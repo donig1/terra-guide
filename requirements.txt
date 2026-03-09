@@ -1,0 +1,6 @@
+pyserial
+flask
+smbus2
+pyttsx3
+SpeechRecognition
+pyaudio
