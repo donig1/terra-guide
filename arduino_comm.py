@@ -73,6 +73,22 @@ class ArduinoComm:
                     "humidity":  float(p[3]),    # % DHT22
                     "distance":  float(p[4]),    # cm HC-SR04
                 }
+                # Validim kufijsh – hedh jashtë vlera të pamundshme fizikisht
+                if not (0 <= data["moisture"] <= 1023):
+                    print(f"[PARSE] lagështia jashtë kufijve: {data['moisture']}")
+                    return None, None
+                if not (-50 <= data["soil_temp"] <= 80):
+                    print(f"[PARSE] temp toke jashtë kufijve: {data['soil_temp']}")
+                    return None, None
+                if not (-50 <= data["air_temp"] <= 80):
+                    print(f"[PARSE] temp ajri jashtë kufijve: {data['air_temp']}")
+                    return None, None
+                if not (0 <= data["humidity"] <= 100):
+                    print(f"[PARSE] lagështia ajri jashtë kufijve: {data['humidity']}")
+                    return None, None
+                if not (0 <= data["distance"] <= 500):
+                    print(f"[PARSE] distanca jashtë kufijve: {data['distance']}")
+                    return None, None
                 self.last_data = data
                 return "DATA", data
             except Exception as e:
@@ -83,7 +99,10 @@ class ArduinoComm:
             return "STATUS", line.replace("STATUS:", "")
 
         if line.startswith("OBS:"):
-            return "OBS", float(line.replace("OBS:", ""))
+            try:
+                return "OBS", float(line.replace("OBS:", ""))
+            except:
+                return None, None
 
         return None, None
 

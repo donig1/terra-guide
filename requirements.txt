@@ -1,6 +1,30 @@
-pyserial
-flask
-smbus2
-pyttsx3
-SpeechRecognition
-pyaudio
+# Terra Guide — requirements.txt
+# Install with:  pip install -r requirements.txt
+
+# Core UI
+pygame>=2.5.0
+
+# TTS — online (clear English, recommended)
+gTTS>=2.5.0
+
+# TTS — offline fallback
+pyttsx3>=2.90
+
+# Speech Recognition (STT)
+SpeechRecognition>=3.10.0
+
+# Arduino communication
+pyserial>=3.5
+
+# AI Chatbot
+openai>=1.30.0
+
+# Web dashboard
+flask>=3.0.0
+
+# Sensor math (optional but useful)
+numpy>=1.24.0
+
+# Note for Raspberry Pi:
+# sudo apt install python3-pygame portaudio19-dev espeak
+# pip install --break-system-packages -r requirements.txt

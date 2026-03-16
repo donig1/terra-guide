@@ -1,140 +1,124 @@
-#!/usr/bin/env python3
-# ============================================
-# main.py – ARES-X V3 Kontrolli Kryesor
-# Ekzekuto: python3 main.py
-# ============================================
+"""
+Terra Guide — main.py  (v3)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Launches 3 threads:
+  1. arduino_thread  — reads sensors → sensor_data dict
+  2. chatbot_thread  — voice loop (listen → GPT → speak → face)
+  3. main thread     — pygame face (run_face blocks here)
 
-import time
+Keys during run:
+  1-9, 0 = manual face state
+  ESC     = quit
+"""
+
 import threading
+import queue
+import time
+import math
+import random
 
-from arduino_comm  import ArduinoComm
-from soil_analyzer import SoilAnalyzer
-from chatbot       import Chatbot
-from data_logger   import init, save
-from dashboard     import run_dashboard
+from face_engine import run_face
 
-# ══════════════════════════════════════════
-print("╔══════════════════════════════════════╗")
-print("║   ARES-X  V3  –  Duke u nisur...     ║")
-print("╚══════════════════════════════════════╝\n")
+# ── Shared state ─────────────────────────────────────────────────────────
+cmd_queue   = queue.Queue()    # chatbot → face
+sensor_data = {}               # arduino → chatbot + face
 
-# ── Inicializim ───────────────────────────
-arduino = ArduinoComm()
-soil    = SoilAnalyzer()
-init()
 
-# ── Chatbot ───────────────────────────────
-bot = Chatbot(soil_analyzer=soil)
-bot.start()
+# ── Arduino thread ────────────────────────────────────────────────────────
+def arduino_thread():
+    try:
+        from arduino_comm import ArduinoComm
+        arduino = ArduinoComm()
+        use_real = True
+        print("[Arduino] Connected to real hardware")
+    except Exception:
+        arduino  = None
+        use_real = False
+        print("[Arduino] Hardware not found — using simulation")
 
-# ── Dashboard ─────────────────────────────
-threading.Thread(target=run_dashboard, daemon=True).start()
-print("[DASH] 🌐 http://raspberrypi.local:5000\n")
+    t = 0.0
+    while True:
+        t += 0.5
 
-# ── Variabla gjendjes ─────────────────────
-stop_count = 0
-MAX_STOPS  = 5
-last_data  = {}
-measuring  = False
+        if use_real and arduino:
+            data = arduino.read_data()
+        else:
+            # ── Simulation ──────────────────────────────────────
+            raw = int(450 + math.sin(t * 0.28) * 220)
+            raw = max(0, min(1023, raw))
+            pct = round((1 - raw / 1023) * 100, 1)
 
-# ══════════════════════════════════════════
-def measure_and_analyze(sensor_data):
-    global stop_count
-    stop_count += 1
-    pump_used = False
+            if   raw < 300: status = 'WET'
+            elif raw < 500: status = 'OPTIMAL'
+            elif raw < 700: status = 'DRY'
+            else:           status = 'CRITICAL'
 
-    print(f"\n{'═'*48}")
-    print(f"  📍 PIKË MATJEJE  {stop_count}/{MAX_STOPS}")
-    print(f"{'═'*48}")
+            data = {
+                'moisture_raw':    raw,
+                'moisture_pct':    pct,
+                'moisture_status': status,
+                'soil_temp':       round(21 + math.sin(t * 0.18) * 5, 1),
+                'air_temp':        round(24 + math.sin(t * 0.13) * 3, 1),
+                'humidity':        round(60 + math.sin(t * 0.22) * 14, 0),
+                'distance':        round(80 + random.uniform(-10, 10), 1),
+                'pump_active':     status in ('DRY', 'CRITICAL'),
+                'crop':            'tomatoes',
+            }
 
-    # ── 1. Analizo tokën ──────────────────
-    report = soil.full_report(sensor_data)
-    print(f"  🌡️  Temp Tokë   : {report['soil_temp']}°C  → {report['temp_msg']}")
-    print(f"  💧  Lagështia   : {report['moisture_pct']}%  → {report['moisture_msg']}")
-    print(f"  🌤️  Temp Ajrit  : {report['air_temp']}°C")
-    print(f"  💦  Lag. Ajrit  : {report['humidity']}%")
+        sensor_data.update(data)
+        time.sleep(0.5)
 
-    # ── 2. Kontrollo mbjellë ──────────────
-    p = report["planting"]
-    print(f"\n  🌱 Gati për mbjellë? {'PO ✅' if p['suitable'] else 'JO ❌'}")
-    print(f"     Nota: {p['grade']} ({p['score']}/100)")
-    for r in p["reasons"] + p["warnings"]:
-        print(f"     {r}")
 
-    # ── 3. Ujitje nëse duhet ─────────────
-    if report["needs_irrigation"]:
-        print(f"\n  💧 UJITJE: Toka e thatë – aktivizoj pompën!")
-        arduino.send("IRRIGATE_ON")
-        bot.simulate_pump(True)
-        pump_used = True
-        time.sleep(3)
-        arduino.send("IRRIGATE_OFF")
-        bot.simulate_pump(False)
-        print("  💧 Ujitja u kompletua")
-    else:
-        print(f"\n  ✅ Ujitje: nuk nevojitet ({report['moisture_pct']}%)")
+# ── Chatbot thread ────────────────────────────────────────────────────────
+def chatbot_thread():
+    # Wait for pygame/face to init
+    time.sleep(2.5)
 
-    # ── 4. Chatbot flet rezultatin ────────
-    msg = f"Pika matjeje {stop_count}. "
-    msg += soil.speak_report(report)
-    bot.speak(msg)
+    try:
+        from chatbot import ChatBot
+        bot = ChatBot(face_queue=cmd_queue, sensor_data=sensor_data)
+        bot.run_voice_loop()
 
-    # ── 5. Përditëso chatbot ──────────────
-    bot.update_data(sensor_data, report)
+    except ImportError as e:
+        print(f"[Chatbot] Import error: {e}")
+        _demo_mode()
 
-    # ── 6. Ruaj në CSV ───────────────────
-    save(report, None, pump_used)
+    except Exception as e:
+        print(f"[Chatbot] Error: {e}")
+        _demo_mode()
 
-    print(f"\n  📊 Ruajtur | Dashboard: http://raspberrypi.local:5000")
-    print(f"{'═'*48}\n")
 
-    # ── 7. Vazhdo misionin ───────────────
-    time.sleep(2)
-    if stop_count < MAX_STOPS:
-        arduino.send("FOLLOW")
-    else:
-        arduino.send("STOP")
-        bot.speak(f"Misioni kompletua. Kreu {MAX_STOPS} matje. Shiko rezultatet në dashboard.")
+def _demo_mode():
+    """Fallback demo if chatbot fails — cycles through messages."""
+    print("[Chatbot] Running in demo mode (no voice)")
+    MSGS = [
+        ('happy',    "Good morning! I am Terra Guide, your field assistant."),
+        ('talking',  "Soil moisture is currently optimal for tomatoes."),
+        ('thinking', "Analyzing temperature and humidity trends..."),
+        ('sad',      "Moisture levels are starting to drop. Monitor closely."),
+        ('surprised',"Obstacle detected just ahead! Stopping now."),
+        ('laughing', "Great news — rain is forecast for tomorrow!"),
+        ('angry',    "Critical alert! Pump activated immediately."),
+        ('idle',     ""),
+    ]
+    i = 0
+    while True:
+        state, text = MSGS[i % len(MSGS)]
+        cmd_queue.put({'state': state, 'text': text, 'mic': False})
+        i += 1
+        time.sleep(5.0)
 
-# ══════════════════════════════════════════
-# LOOP KRYESOR
-# ══════════════════════════════════════════
-try:
-    arduino.send("FOLLOW")
-    print("[NAV] 🚗 Roboti duke ndjekur linjën...\n")
 
-    while stop_count < MAX_STOPS:
-        line = arduino.read_line()
+# ── Entry point ───────────────────────────────────────────────────────────
+if __name__ == '__main__':
+    print("🌱 Terra Guide starting...")
 
-        if line:
-            msg_type, data = arduino.parse(line)
+    t1 = threading.Thread(target=arduino_thread, daemon=True, name='Arduino')
+    t2 = threading.Thread(target=chatbot_thread, daemon=True, name='ChatBot')
+    t1.start()
+    t2.start()
 
-            if msg_type == "DATA":
-                last_data = data
-                print(f"[LIVE] 🌡️{data['soil_temp']}°C | "
-                      f"💧{round((1-data['moisture']/1023)*100,1)}% | "
-                      f"🌤️{data['air_temp']}°C | "
-                      f"📏{data['distance']}cm")
+    # pygame must run on main thread
+    run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)
 
-            elif msg_type == "STATUS" and data == "STOP_POINT" and not measuring:
-                measuring = True
-                sensor    = last_data if last_data else arduino.simulate()
-                measure_and_analyze(sensor)
-                measuring = False
-
-            elif msg_type == "OBS":
-                print(f"[NAV] ⚠️ Pengesë {data}cm – duke pritur...")
-                time.sleep(1)
-
-        time.sleep(0.05)
-
-except KeyboardInterrupt:
-    print("\n[ARES-X] Ndaluar (Ctrl+C)")
-    arduino.send("STOP")
-    bot.stop()
-
-except Exception as e:
-    print(f"\n[ERROR] {e}")
-    arduino.send("STOP")
-    bot.stop()
-    raise
+    print("Terra Guide stopped.")

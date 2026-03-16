@@ -1,5 +1,5 @@
 # ============================================
-# dashboard.py – Web Dashboard ARES-X V3
+# dashboard.py – Web Dashboard Terra Guide
 # http://raspberrypi.local:5000
 # ============================================
 
@@ -16,7 +16,7 @@ HTML = """
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta http-equiv="refresh" content="8">
-  <title>ARES-X Dashboard</title>
+  <title>Terra Guide Dashboard</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Segoe UI',Arial,sans-serif;background:#0d1117;color:#e6edf3;padding:24px}
@@ -59,8 +59,8 @@ HTML = """
   </style>
 </head>
 <body>
-  <h1>🤖 ARES-X Dashboard</h1>
-  <div class="sub">Autonomous Farm System · Rifreskim çdo 8 sek · {{ ts }}</div>
+  <h1>🌾 Terra Guide Dashboard</h1>
+  <div class="sub">Sistemi Inteligjent Bujqësor · Rifreskim çdo 8 sek · {{ ts }}</div>
 
   {% if last %}
 
@@ -149,7 +149,7 @@ HTML = """
   <p style="color:#8b949e;margin-top:40px">⏳ Duke pritur të dhëna nga Arduino...</p>
   {% endif %}
 
-  <p class="refresh">ARES-X V3 · {{ ts }}</p>
+  <p class="refresh">Terra Guide · {{ ts }}</p>
 </body>
 </html>
 """

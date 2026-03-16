@@ -56,7 +56,8 @@ THRESHOLDS = {
 DASHBOARD_PORT = 5000
 DATA_FILE      = "data/farm_data.csv"
 LOG_FILE       = "logs/ares_x.log"
-
+# ── Misioni ──────────────────────────
+MAX_STOPS      = 5    # Sa pika matjeje bën roboti
 # ── Chatbot ────────────────────────────────
 CHATBOT_LANGUAGE = "sq"          # "sq"=shqip, "en"=anglisht
 VOICE_RATE       = 150           # Shpejtësia e të folurit

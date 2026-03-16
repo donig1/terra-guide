@@ -38,10 +38,10 @@ def save(soil_report, plant_health=None, pump=False):
         "planting_suitable":  p.get("suitable", ""),
         "planting_score":     p.get("score", ""),
         "planting_grade":     p.get("grade", ""),
-        "needs_irrigation":   soil_report.get("needs_irrigation", ""),
+        "needs_irrigation":   "1" if soil_report.get("needs_irrigation") else "0",
         "plant_status":       plant_health.get("status", "") if plant_health else "",
         "plant_details":      plant_health.get("details", "") if plant_health else "",
-        "pump_activated":     pump,
+        "pump_activated":     "1" if pump else "0",
     }
     with open(DATA_FILE, 'a', newline='') as f:
         csv.DictWriter(f, fieldnames=FIELDS).writerow(row)
