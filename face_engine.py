@@ -19,7 +19,7 @@ import time
 import os
 
 # ─── Screen ────────────────────────────────────────────────────────────────
-W, H      = 1024, 720
+W, H      = 1024, 768
 HUD_H     = 90           # bottom sensor bar
 SUB_H     = 48           # subtitle strip just above HUD
 FACE_AREA = H - HUD_H - SUB_H
