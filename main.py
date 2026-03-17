@@ -70,13 +70,13 @@ def arduino_thread():
 
 
 # ── Chatbot thread ────────────────────────────────────────────────────────
-def chatbot_thread():
+def chatbot_thread(farming_ops=None):
     # Wait for pygame/face to init
     time.sleep(2.5)
 
     try:
         from chatbot import ChatBot
-        bot = ChatBot(face_queue=cmd_queue, sensor_data=sensor_data)
+        bot = ChatBot(face_queue=cmd_queue, sensor_data=sensor_data, farming_ops=farming_ops)
         bot.run_voice_loop()
 
     except ImportError as e:
@@ -113,8 +113,26 @@ def _demo_mode():
 if __name__ == '__main__':
     print("🌱 Terra Guide starting...")
 
+    # Initialize Arduino communication
+    try:
+        from arduino_comm import ArduinoComm
+        arduino = ArduinoComm()
+    except Exception as e:
+        print(f"[Main] Arduino init error: {e}")
+        arduino = None
+    
+    # Initialize farming operations (servo control)
+    farming_ops = None
+    if arduino:
+        try:
+            from farming_operations import FarmingOperations
+            farming_ops = FarmingOperations(arduino)
+            print("[Main] Farming operations initialized ✓")
+        except Exception as e:
+            print(f"[Main] Farming operations error: {e}")
+
     t1 = threading.Thread(target=arduino_thread, daemon=True, name='Arduino')
-    t2 = threading.Thread(target=chatbot_thread, daemon=True, name='ChatBot')
+    t2 = threading.Thread(target=chatbot_thread, args=(farming_ops,), daemon=True, name='ChatBot')
     t1.start()
     t2.start()
 

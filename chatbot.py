@@ -78,22 +78,18 @@ def pick_emotion(text: str, sensors: dict) -> str:
     return 'talking'
 
 
-# ─── TTS (gTTS + pygame) ───────────────────────────────────────────────────
+# ─── TTS (gTTS for English) ───────────────────────────────────────────────────
 def speak_gtts(text: str):
-    """Speak text using gTTS (Google). Blocks until done."""
+    """Speak text using gTTS in English. Blocks until done."""
     try:
         tts = gTTS(text=text, lang='en', slow=False)
         fd, path = tempfile.mkstemp(suffix='.mp3')
         os.close(fd)
         tts.save(path)
 
-        if not pygame.mixer.get_init():
-            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
-        pygame.mixer.music.load(path)
-        pygame.mixer.music.set_volume(1.0)
-        pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy():
-            time.sleep(0.04)
+        # Përdor mpg123 direkt — më i besueshëm në Raspberry Pi
+        os.system(f'mpg123 -a hw:0,0 -q "{path}"')
+
     except Exception as e:
         print(f"[TTS] gTTS error: {e}")
         _speak_pyttsx3(text)
@@ -103,16 +99,16 @@ def speak_gtts(text: str):
 
 
 def _speak_pyttsx3(text: str):
-    """Offline fallback TTS."""
+    """Offline fallback TTS with male voice."""
     try:
         import pyttsx3
         engine = pyttsx3.init()
         engine.setProperty('rate', 148)
         engine.setProperty('volume', 1.0)
         voices = engine.getProperty('voices')
-        for v in voices:
-            if 'english' in v.name.lower() or 'en_us' in v.id.lower():
-                engine.setProperty('voice', v.id); break
+        # Select male voice (usually index 0)
+        if voices:
+            engine.setProperty('voice', voices[0].id)
         engine.say(text)
         engine.runAndWait()
     except Exception as e:
@@ -129,9 +125,10 @@ class ChatBot:
         bot.run_voice_loop()   # runs forever in its own thread
     """
 
-    def __init__(self, face_queue: queue.Queue, sensor_data: dict):
+    def __init__(self, face_queue: queue.Queue, sensor_data: dict, farming_ops=None):
         self.face_q      = face_queue
         self.sensor_data = sensor_data
+        self.farming_ops = farming_ops  # Optional farming operations controller
         self.history     = []        # [{role, content}, ...]
         self.client      = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         self.recognizer  = sr.Recognizer()
@@ -146,15 +143,14 @@ class ChatBot:
     def _init_mic(self):
         mics = sr.Microphone.list_microphone_names()
         print(f"[Mic] Available: {mics}")
-        # prefer USB mic if available
+        # Kërko USB mic (card 2)
         for i, name in enumerate(mics):
-            if any(k in name.lower() for k in ('usb','array','micro','input')):
+            if any(k in name.lower() for k in ('usb','pnp','array','micro')):
                 self.mic = sr.Microphone(device_index=i)
-                print(f"[Mic] Using: {name}")
+                print(f"[Mic] USB mic gjetur: {name} (index {i})")
                 return
-        # default
         self.mic = sr.Microphone()
-        print(f"[Mic] Using default microphone")
+        print("[Mic] Duke përdorur mikrofonin default")
 
     # ── face control ──────────────────────────────────────────────────────
     def _set_face(self, state, text='', mic=False):
@@ -194,14 +190,14 @@ class ChatBot:
         try:
             with self.mic as source:
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.4)
-                print("[Mic] Listening...")
+                print("[Mic] Dëgjim...")
                 audio = self.recognizer.listen(
                     source,
                     timeout=LISTEN_TIMEOUT,
                     phrase_time_limit=LISTEN_PHRASE
                 )
-            text = self.recognizer.recognize_google(audio, language='en-US')
-            print(f"[STT] Heard: {text}")
+            text = self.recognizer.recognize_google(audio, language='sq')
+            print(f"[STT] Dëgjova: {text}")
             return text
         except sr.WaitTimeoutError:
             return None
@@ -220,8 +216,78 @@ class ChatBot:
         self._set_face(emotion if emotion != 'talking' else 'talking', text)
         speak_gtts(text)
         self._set_face('idle')
-
-    # ── main loop ─────────────────────────────────────────────────────────
+    # ── Farming commands ───────────────────────────────────────────────────────
+    def _check_for_farming_commands(self, user_text: str) -> str | None:
+        """Check if user_text contains farming commands."""
+        if not self.farming_ops:
+            return None
+        
+        text_lower = user_text.lower()
+        
+        # Plowing commands
+        if any(cmd in text_lower for cmd in ['plow', 'dig', 'till', 'start plowing', 'begin plow']):
+            self.farming_ops.start_plowing(interval=3.0)
+            self._set_face('happy', 'Starting plowing operation')
+            return "Plowing operation started. I will dig the soil now."
+        
+        if any(cmd in text_lower for cmd in ['stop plow', 'stop digging', 'stop till']):
+            self.farming_ops.stop_plowing()
+            self._set_face('idle')
+            return "Plowing stopped."
+        
+        # Soil monitoring commands
+        if any(cmd in text_lower for cmd in ['scan soil', 'check soil', 'measure moisture', 'test soil']):
+            self.farming_ops.manual_soil_scan()
+            self._set_face('thinking', 'Scanning soil...')
+            return "Soil scan completed. Sensor reading taken."
+        
+        if any(cmd in text_lower for cmd in ['start monitoring', 'monitor soil', 'continuous scan']):
+            self.farming_ops.start_soil_monitoring(interval=30.0)
+            self._set_face('happy')
+            return "Soil monitoring started. I will check the soil every 30 seconds."
+        
+        if any(cmd in text_lower for cmd in ['stop monitoring', 'stop scan', 'no more soil']):
+            self.farming_ops.stop_soil_monitoring()
+            self._set_face('idle')
+            return "Soil monitoring stopped."
+        
+        # Seed dispensing commands
+        if any(cmd in text_lower for cmd in ['dispense seeds', 'distribute seeds', 'sow seeds', 'scatter seeds']):
+            if 'light' in text_lower:
+                self.farming_ops.dispense_seeds('light')
+                self._set_face('talking')
+                return "Dispensing light amount of seeds."
+            elif 'heavy' in text_lower:
+                self.farming_ops.dispense_seeds('heavy')
+                self._set_face('talking')
+                return "Dispensing heavy amount of seeds."
+            else:
+                self.farming_ops.dispense_seeds('normal')
+                self._set_face('talking')
+                return "Dispensing normal amount of seeds."
+        
+        # Auto cycle
+        if any(cmd in text_lower for cmd in ['start farming', 'auto cycle', 'farming cycle', 'begin cultivation']):
+            self._set_face('thinking', 'Starting farming cycle...')
+            time.sleep(1)
+            self.farming_ops.automatic_farming_cycle()
+            self._set_face('happy')
+            return "Automatic farming cycle has been initiated."
+        
+        # Status
+        if any(cmd in text_lower for cmd in ['status', 'what are you doing', 'farm status', 'operations']):
+            self.farming_ops.print_status()
+            self._set_face('happy')
+            return "Showing current farm operations status."
+        
+        # Emergency stop
+        if any(cmd in text_lower for cmd in ['emergency stop', 'stop all', 'stop everything', 'abort']):
+            self.farming_ops.emergency_stop()
+            self._set_face('angry')
+            return "Emergency stop activated. All operations halted."
+        
+        return None
+        # ── main loop ─────────────────────────────────────────────────────────
     def run_voice_loop(self):
         """Infinite voice loop. Run in a background thread."""
         print("[ChatBot] Voice loop started. Say something!")
@@ -258,9 +324,15 @@ class ChatBot:
                 self._set_face('thinking', f'"{user_text}"', mic=False)
                 time.sleep(0.3)
 
-                # get GPT reply
-                reply  = self.ask_gpt(user_text)
-                emotion = pick_emotion(reply, self.sensor_data)
+                # Check for farming commands first
+                cmd_result = self._check_for_farming_commands(user_text)
+                if cmd_result:
+                    reply = cmd_result
+                    emotion = 'happy'
+                else:
+                    # get GPT reply
+                    reply  = self.ask_gpt(user_text)
+                    emotion = pick_emotion(reply, self.sensor_data)
 
                 print(f"[GPT] Reply: {reply}")
 

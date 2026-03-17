@@ -66,7 +66,7 @@ FULLSCREEN        = True
 FPS               = 30
 
 # Madhësia e fytyrës (ul numrin nëse del e madhe)
-FACE_SCALE        = 0.32        # 0.32 → ~245px radius
+FACE_SCALE        = 0.25        # 0.32 → ~245px radius
 
 # Qendra e fytyrës
 FACE_CENTER_X     = SCREEN_W // 2    # 512
