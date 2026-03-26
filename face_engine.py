@@ -793,7 +793,3 @@ if __name__ == '__main__':
     except Exception as e:
         print(f'[Main] Chatbot error: {e}')
     run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)
-    run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)
-    from arduino_bridge import ArduinoBridge
-bridge = ArduinoBridge(face=face, sensor_data=face.sensors)
-bridge.start()
