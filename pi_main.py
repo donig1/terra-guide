@@ -52,6 +52,9 @@ def arduino_thread():
 
         if use_real and arduino:
             data = arduino.read_data()
+            if data is None:
+                time.sleep(0.5)
+                continue
         else:
             raw = int(450 + math.sin(t * 0.28) * 220)
             raw = max(0, min(1023, raw))
@@ -132,21 +135,16 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"[Main] Arduino: simulim aktiv ({e})")
 
-    # ── Servo Pi (GPIO) ───────────────────────────────────────
+    # ── Servo Pi (GPIO) — krijohet nga FarmingOperations automatikisht ──
     pi_servos = None
-    try:
-        from pi_servo_controller import PiServoController
-        pi_servos = PiServoController()
-        print("[Main] Servot Pi GPIO: AKTIV")
-    except Exception as e:
-        print(f"[Main] Servot Pi: {e}")
 
-    # ── Farming Operations ────────────────────────────────────
+    # ── Farming Operations ────────────────────────────────────────
     farming_ops = None
     try:
         from farming_operations import FarmingOperations
         farming_ops = FarmingOperations(arduino=arduino, sensor_data=sensor_data)
-        print("[Main] Farming Operations: AKTIV")
+        pi_servos = farming_ops.servos._pi  # referenca tek PiServoController
+        print("[Main] Farming Operations + Servo Pi GPIO: AKTIV")
     except Exception as e:
         print(f"[Main] Farming ops: {e}")
 
