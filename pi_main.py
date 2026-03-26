@@ -119,27 +119,38 @@ def auto_emotion_thread():
 
 # ── Entry point ───────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    print("=" * 50)
-    print("  Terra Guide — Raspberry Pi")
-    print("=" * 50)
+    print("=" * 55)
+    print("  Terra Guide — Raspberry Pi  🌱")
+    print("=" * 55)
 
-    # Arduino
+    # ── Arduino ──────────────────────────────────────────────
     arduino = None
     try:
         from arduino_comm import ArduinoComm
         arduino = ArduinoComm()
+        print("[Main] Arduino: U LIDH")
     except Exception as e:
-        print(f"[Main] Arduino init: {e}")
+        print(f"[Main] Arduino: simulim aktiv ({e})")
 
+    # ── Servo Pi (GPIO) ───────────────────────────────────────
+    pi_servos = None
+    try:
+        from pi_servo_controller import PiServoController
+        pi_servos = PiServoController()
+        print("[Main] Servot Pi GPIO: AKTIV")
+    except Exception as e:
+        print(f"[Main] Servot Pi: {e}")
+
+    # ── Farming Operations ────────────────────────────────────
     farming_ops = None
-    if arduino:
-        try:
-            from farming_operations import FarmingOperations
-            farming_ops = FarmingOperations(arduino)
-            print("[Main] Farming operations OK")
-        except Exception as e:
-            print(f"[Main] Farming ops: {e}")
+    try:
+        from farming_operations import FarmingOperations
+        farming_ops = FarmingOperations(arduino=arduino, sensor_data=sensor_data)
+        print("[Main] Farming Operations: AKTIV")
+    except Exception as e:
+        print(f"[Main] Farming ops: {e}")
 
+    # ── Threads ───────────────────────────────────────────────
     t1 = threading.Thread(target=arduino_thread,      daemon=True, name='Arduino')
     t2 = threading.Thread(target=chatbot_thread,      args=(farming_ops,), daemon=True, name='ChatBot')
     t3 = threading.Thread(target=auto_emotion_thread, daemon=True, name='AutoEmotion')
@@ -150,15 +161,23 @@ if __name__ == '__main__':
     if _DASH_OK:
         t4 = threading.Thread(target=_dash.run_dashboard, daemon=True, name='Dashboard')
         t4.start()
-        print('[Dashboard] Duke u nisur ne port 5000...')
+        print('[Main] Dashboard: port 5000')
 
+    print("[Main] Të gjitha threaded-et aktive — Duke nisur fytyra...\n")
+
+    # ── Fytyra Fullscreen ─────────────────────────────────────
     if _FACE_OK:
-        print("[Face] Duke nisur pygame ne Pi...")
+        # Mesazh mirëseardhjeje
+        cmd_queue.put({'state': 'happy', 'text': 'Terra Guide është gati!', 'mic': False})
         run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)
     else:
-        print("[Face] pygame/face_engine nuk u ngarkua — duke pritur...")
+        print("[Face] pygame nuk u ngarkua — vetëm backend aktiv")
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("\n[Pi] Ndërprerë nga përdoruesi.")
+            print("\n[Pi] Ndërprerë.")
+
+    # ── Pastrim Servo ─────────────────────────────────────────
+    if pi_servos:
+        pi_servos.cleanup()
