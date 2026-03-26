@@ -50,7 +50,7 @@ THRESHOLDS = {
 # ── Raspberry Pi (IP ne rrjet lokal) ───────
 # Ndrysho kete me IP-ne e vertete te Raspberry Pi!
 # (komanda: hostname -I  ne terminal te Pi)
-PI_IP   = "192.168.1.100"
+PI_IP   = "172.20.10.2"
 
 # ── Dashboard ──────────────────────────────
 DASHBOARD_PORT = 5000
