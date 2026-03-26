@@ -18,7 +18,6 @@ import time
 import math
 import random
 
-# Komanda per fytyren i ruajme per mundesi integrimi
 cmd_queue   = queue.Queue()
 sensor_data = {}
 
@@ -27,6 +26,12 @@ try:
     _DASH_OK = True
 except Exception:
     _DASH_OK = False
+
+try:
+    from face_engine import run_face
+    _FACE_OK = True
+except Exception:
+    _FACE_OK = False
 
 
 # ── Arduino thread ────────────────────────────────────────────────────────
@@ -89,36 +94,33 @@ def chatbot_thread(farming_ops=None):
         print(f"[Chatbot] Error: {e}")
 
 
-# ── Auto emotion thread (per dashboard status vetëm) ─────────────────────
+# ── Auto emotion thread ───────────────────────────────────────────────────
 def auto_emotion_thread():
-    """Monitoron sensoret dhe printojme statusin (pa pygame ketu)."""
+    """Monitoron sensoret dhe ndryshon fytyren automatikisht."""
     _last = {'status': None}
+
+    def _emit(state, text):
+        if state != _last['status']:
+            _last['status'] = state
+            cmd_queue.put({'state': state, 'text': text, 'mic': False})
+
     while True:
-        time.sleep(10)
+        time.sleep(2)
         if not sensor_data:
             continue
-        status  = sensor_data.get('moisture_status', 'OPTIMAL')
-        pct     = float(sensor_data.get('moisture_pct', 50))
+        status = sensor_data.get('moisture_status', 'OPTIMAL')
+        pct    = float(sensor_data.get('moisture_pct', 50))
 
-        if status == _last['status']:
-            continue
-        _last['status'] = status
-
-        label = {
-            'OPTIMAL':  f'✓ MBJOLLUR — lageshti {pct:.0f}% (e pershtashme)',
-            'DRY':      f'✗ KALOI    — toka e thate {pct:.0f}%',
-            'WET':      f'✗ KALOI    — toka shume e laget {pct:.0f}%',
-            'CRITICAL': f'✗ KALOI    — gjendje kritike {pct:.0f}%',
-        }.get(status, status)
-        print(f"[Sensor] {label}")
+        if   status == 'OPTIMAL':  _emit('happy',    f'Lagështia optimale {pct:.0f}%')
+        elif status == 'DRY':      _emit('sad',       f'Toka e thatë {pct:.0f}%')
+        elif status == 'WET':      _emit('confused',  f'Toka shumë e lagët {pct:.0f}%')
+        elif status == 'CRITICAL': _emit('angry',     f'Gjendje kritike {pct:.0f}%')
 
 
 # ── Entry point ───────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print("=" * 50)
-    print("  Terra Guide — Raspberry Pi Backend")
-    print("  Dashboard: http://<PI_IP>:5000")
-    print("  Fytyra del ne Laptop (laptop_face.py)")
+    print("  Terra Guide — Raspberry Pi")
     print("=" * 50)
 
     # Arduino
@@ -138,9 +140,9 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"[Main] Farming ops: {e}")
 
-    t1 = threading.Thread(target=arduino_thread,       daemon=True, name='Arduino')
-    t2 = threading.Thread(target=chatbot_thread,       args=(farming_ops,), daemon=True, name='ChatBot')
-    t3 = threading.Thread(target=auto_emotion_thread,  daemon=True, name='AutoEmotion')
+    t1 = threading.Thread(target=arduino_thread,      daemon=True, name='Arduino')
+    t2 = threading.Thread(target=chatbot_thread,      args=(farming_ops,), daemon=True, name='ChatBot')
+    t3 = threading.Thread(target=auto_emotion_thread, daemon=True, name='AutoEmotion')
     t1.start()
     t2.start()
     t3.start()
@@ -149,15 +151,14 @@ if __name__ == '__main__':
         t4 = threading.Thread(target=_dash.run_dashboard, daemon=True, name='Dashboard')
         t4.start()
         print('[Dashboard] Duke u nisur ne port 5000...')
+
+    if _FACE_OK:
+        print("[Face] Duke nisur pygame ne Pi...")
+        run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)
     else:
-        print('[Dashboard] GABIM: dashboard.py nuk u ngarkua')
-
-    print("\n[Pi] Te gjitha threaded-et jane aktive.")
-    print("[Pi] Hap laptop_face.py ne laptop per te shfaqur fytyren.\n")
-
-    # Mbaj procesin aktiv (pa pygame)
-    try:
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        print("\n[Pi] Nderprerje — duke u mbyllur...")
+        print("[Face] pygame/face_engine nuk u ngarkua — duke pritur...")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[Pi] Ndërprerë nga përdoruesi.")
