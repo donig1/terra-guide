@@ -59,6 +59,7 @@ class PiServoController:
         self._running = False
         self._pwm     = {}   # {pin: GPIO.PWM object}
         self._angles  = {PIN_PLOW: 180, PIN_SENSOR: 90, PIN_HOPPER: 0}
+        self._gpio_ready = False
 
         if _GPIO_OK:
             self._setup_gpio()
@@ -67,13 +68,21 @@ class PiServoController:
 
     # ── Inicializim GPIO ─────────────────────────────────────────
     def _setup_gpio(self):
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-        for pin in (PIN_PLOW, PIN_SENSOR, PIN_HOPPER):
-            GPIO.setup(pin, GPIO.OUT)
-            pwm = GPIO.PWM(pin, PWM_FREQ)
-            pwm.start(0)
-            self._pwm[pin] = pwm
+        try:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+            for pin in (PIN_PLOW, PIN_SENSOR, PIN_HOPPER):
+                GPIO.setup(pin, GPIO.OUT)
+                pwm = GPIO.PWM(pin, PWM_FREQ)
+                pwm.start(0)
+                self._pwm[pin] = pwm
+            self._gpio_ready = True
+        except RuntimeError as exc:
+            self._gpio_ready = False
+            self._pwm.clear()
+            print(f"[PiServo] GPIO jo i përdorshëm ({exc}) — kaloj në simulim")
+            return
+
         # Pozicionet fillestare
         self._move(PIN_PLOW,   180)
         time.sleep(0.3)
@@ -90,7 +99,7 @@ class PiServoController:
 
     def _duty(self, pin: int, duty: float):
         """Vendos duty cycle direkt."""
-        if _GPIO_OK and pin in self._pwm:
+        if _GPIO_OK and self._gpio_ready and pin in self._pwm:
             self._pwm[pin].ChangeDutyCycle(duty)
         else:
             name = {PIN_PLOW: 'PLUGUN', PIN_SENSOR: 'SENSOR', PIN_HOPPER: 'KAZAN'}.get(pin, pin)
@@ -98,10 +107,25 @@ class PiServoController:
 
     def cleanup(self):
         """Lësho GPIO burimet."""
-        if _GPIO_OK:
+        if _GPIO_OK and self._gpio_ready:
             for pwm in self._pwm.values():
                 pwm.stop()
             GPIO.cleanup()
+
+    def plow(self, angle: float):
+        """API e thjeshtë për testim manual të servos së plugut."""
+        with self._lock:
+            self._move(PIN_PLOW, angle)
+
+    def scan(self, angle: float):
+        """API e thjeshtë për testim manual të servos së sensorit."""
+        with self._lock:
+            self._move(PIN_SENSOR, angle)
+
+    def dispense(self, enabled: bool):
+        """API kompatibile për hap/mbyll servon continuous të kazanit."""
+        with self._lock:
+            self._duty(PIN_HOPPER, HOPPER_FORWARD if enabled else HOPPER_STOP)
 
     # ════════════════════════════════════════════════════════════
     # SERVO 1: PLUGUN  (GPIO 17)
