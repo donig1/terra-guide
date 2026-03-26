@@ -1,37 +1,22 @@
 """
-servo_controller.py – Kontrolli i tre servo motorëve për ARES-X V3
+servo_controller.py – Fasadë mbi PiServoController
 ──────────────────────────────────────────────────────────────────
-1. Servo Plugun (PLOW_SERVO) - Pin 9
-   - Pozicioni fillestar: 180°
-   - Hap dheu duke lëvizur 30° në krahun orar (180° → 150°)
-   - Kthehet prap në 180°
-   - Duhet të lëvizet vazhdimisht për të hapur gropat
+Servot kontrollohen DIREKT nga Raspberry Pi GPIO (pi_servo_controller.py)
+Arduino vetëm lexon sensorët — nuk merret me servot.
 
-2. Servo Soil Sensor (SENSOR_SERVO) - Pin 10
-   - Lëviz në krahun orar (rrethore)
-   - Lëviz 50° për të ulur sensorin (p.sh. 90° → 40°)
-   - Pas një fare kohe ngrihet prap (40° → 90°)
-   - Përdoret për skenimin periodik
-
-3. Servo Kazan Fare (HOPPER_SERVO) - Pin 11
-   - Rrotacion i plotë 360°
-   - Hapje kazan për shpërndarje fare
+Këtë file mund ta importosh si në të kaluarën (backward-compatible).
 """
 
 import threading
 import time
-from arduino_comm import ArduinoComm
+from pi_servo_controller import PiServoController
 
 class ServoController:
     """Kontrolluesi i servo motorëve."""
     
-    # Pin të servo motorëve në Arduino
-    PLOW_SERVO   = 1    # Plugun
-    SENSOR_SERVO = 2    # Soil moisture sensor
-    HOPPER_SERVO = 3    # Kazan fare
-    
-    def __init__(self, arduino: ArduinoComm):
-        self.arduino = arduino
+    def __init__(self, arduino=None):
+        # arduino parametri ruhet për backward-compatibility por nuk përdoret
+        self._pi = PiServoController()
         self._lock = threading.Lock()
         self.running = False
         
@@ -39,137 +24,36 @@ class ServoController:
     # 1. SERVO PLUGUN (Hapur dheu)
     # ────────────────────────────────────────────────────────────────
     
+    # ── Delegim tek PiServoController ──────────────────────────────
+
     def plow_cycle(self, repetitions: int = 1):
-        """
-        Cikli i plugunimit: hap dheu në mënyrë rituale.
-        Pozicioni fillestar: 180°
-        Lëviz 30° në krahun orar: 180° → 150°
-        Kthehet: 150° → 180°
-        Përsërit sipas numrit të kërkesës.
-        """
-        for i in range(repetitions):
-            print(f"[PLOW] Cikli {i+1}/{repetitions}")
-            self._send_servo(self.PLOW_SERVO, 180)  # Pozicioni fillestar
-            time.sleep(0.5)
-            self._send_servo(self.PLOW_SERVO, 150)  # Hap dheu (30°)
-            time.sleep(1.0)
-            self._send_servo(self.PLOW_SERVO, 180)  # Kthehet prap
-            time.sleep(0.5)
-    
+        self._pi.plow_cycle(repetitions)
+
     def start_continuous_plow(self, interval: float = 2.0):
-        """
-        Nis plugunimin vazhdimisht me interval kohe.
-        """
-        def plow_thread():
-            while self.running:
-                self.plow_cycle(1)
-                time.sleep(interval)
-        
         self.running = True
-        t = threading.Thread(target=plow_thread, daemon=True)
-        t.start()
-        print("[PLOW] Plugunimi i vazhdueshëm i nisur")
-    
+        self._pi.start_continuous_plow(interval)
+
     def stop_plow(self):
-        """Ndalon plugunimin e vazhdueshëm."""
         self.running = False
-        print("[PLOW] Plugunimi i vazhdueshëm i ndërprerë")
-    
-    # ────────────────────────────────────────────────────────────────
-    # 2. SERVO SOIL MOISTURE SENSOR (Skenime periodike)
-    # ────────────────────────────────────────────────────────────────
-    
+        self._pi.stop_plow()
+
     def sensor_scan(self):
-        """
-        Uli dhe ngre sensori tokës në mënyrë periodike.
-        Pozicioni fillestar: 90° (lart)
-        Uli sensori: 90° → 40° (50° poshtë)
-        Pret: 2-3 sekonda
-        Ngre sensori: 40° → 90°
-        """
-        print("[SENSOR] Skanon tokën...")
-        self._send_servo(self.SENSOR_SERVO, 90)  # Lart
-        time.sleep(0.5)
-        self._send_servo(self.SENSOR_SERVO, 40)  # Poshtë (50°)
-        time.sleep(2.5)  # Matja zgjat 2-3 sekonda
-        self._send_servo(self.SENSOR_SERVO, 90)  # Ngre prap
-        print("[SENSOR] Skanim i përfunduar")
-    
+        self._pi.sensor_scan()
+
     def start_periodic_scan(self, interval: float = 30.0):
-        """
-        Nis kërkimin periodik të sensorit me interval.
-        """
-        def scan_thread():
-            while self.running:
-                self.sensor_scan()
-                time.sleep(interval)
-        
-        self.running = True
-        t = threading.Thread(target=scan_thread, daemon=True)
-        t.start()
-        print(f"[SENSOR] Kërkimi periodik i nisur (çdo {interval}s)")
-    
+        self._pi.start_periodic_scan(interval)
+
     def stop_scan(self):
-        """Ndalon kërkimin periodik."""
         self.running = False
-        print("[SENSOR] Kërkimi periodik i ndërprerë")
-    
-    # ────────────────────────────────────────────────────────────────
-    # 3. SERVO KAZAN FARE (Hapje dhe mbyllje)
-    # ────────────────────────────────────────────────────────────────
-    
-    def hopper_open(self, duration: float = 5.0):
-        """
-        Hap kazanin e farave me rrotacion të plotë 360°.
-        Pozicioni fillestar: 0°
-        Rrotacion i plotë: 0° → 360° → 0°
-        Qëndron i hapur për kohën e specifikuar.
-        """
-        print("[HOPPER] Hap kazanin...")
-        self._send_servo(self.HOPPER_SERVO, 0)    # Pozicioni fillestar
-        time.sleep(0.5)
-        self._send_servo(self.HOPPER_SERVO, 360)  # Rrotacion i plotë
-        time.sleep(duration)  # Qëndron i hapur
-        self._send_servo(self.HOPPER_SERVO, 0)    # Kthehet në pozicionin fillestar
-        print("[HOPPER] Kazani është i mbyllur")
-    
+
+    def hopper_open(self, duration: float = 3.0):
+        self._pi.hopper_open(duration)
+
     def hopper_dispense(self, pulses: int = 3):
-        """
-        Shpërndan fare me pulse të shumta.
-        Çdo puls = një rrotacion të plotë.
-        """
-        print(f"[HOPPER] Shpërndan fare ({pulses} pulse)...")
-        for i in range(pulses):
-            print(f"  Pulse {i+1}/{pulses}")
-            self._send_servo(self.HOPPER_SERVO, 0)
-            time.sleep(0.3)
-            self._send_servo(self.HOPPER_SERVO, 360)
-            time.sleep(1.0)
-            self._send_servo(self.HOPPER_SERVO, 0)
-            time.sleep(0.5)
-        print("[HOPPER] Shpërndarje e përfunduar")
-    
-    # ────────────────────────────────────────────────────────────────
-    # Metoda të përgjithshme
-    # ────────────────────────────────────────────────────────────────
-    
-    def _send_servo(self, servo_id: int, angle: int):
-        """Dërgo komandën e servo motors tek Arduino."""
-        cmd = f"SERVO:{servo_id},{angle}"
-        with self._lock:
-            self.arduino.send(cmd)
-        print(f"  {cmd}")
-    
+        self._pi.hopper_dispense(pulses)
+
     def reset_all(self):
-        """Ridefinizo të gjithë servot në pozicionet fillestare."""
-        print("[SERVO] Risistem të gjithë servot...")
-        self._send_servo(self.PLOW_SERVO, 180)    # Plugun në 180°
-        time.sleep(0.5)
-        self._send_servo(self.SENSOR_SERVO, 90)   # Sensori në 90° (lart)
-        time.sleep(0.5)
-        self._send_servo(self.HOPPER_SERVO, 0)    # Kazani në 0°
-        time.sleep(0.5)
-        print("[SERVO] Të gjithë servot janë në pozicionet fillestare")
+        self._pi.reset_all()
 
 
 # ════════════════════════════════════════════════════════════════════

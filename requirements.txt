@@ -4,6 +4,9 @@
 # Core UI
 pygame>=2.5.0
 
+# Image processing
+Pillow>=10.0.0
+
 # TTS — online (clear English, recommended)
 gTTS>=2.5.0
 
@@ -22,9 +25,16 @@ openai>=1.30.0
 # Web dashboard
 flask>=3.0.0
 
+# HTTP requests (laptop_face.py → Pi polling)
+requests>=2.31.0
+
 # Sensor math (optional but useful)
 numpy>=1.24.0
 
+# python-dotenv (lexo .env)
+python-dotenv>=1.0.0
+
 # Note for Raspberry Pi:
 # sudo apt install python3-pygame portaudio19-dev espeak
+# pip install RPi.GPIO          ← vetëm në Raspberry Pi
 # pip install --break-system-packages -r requirements.txt

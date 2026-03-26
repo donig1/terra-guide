@@ -1,55 +1,54 @@
 """
 farming_operations.py – Operacionet e kultivimit për ARES-X V3
 ─────────────────────────────────────────────────────────────
-Menaxhon operacionet e fermës si:
-- Plugunimi i vazhdueshëm
-- Skanimi periodik i sensorit
-- Shpërndarje fare
-- Ujitja automatike
+Koordinon:
+- Plugunimi i vazhdueshëm      → Servo 1 (Pi GPIO 17)
+- Skanimi periodik i sensorit  → Servo 2 (Pi GPIO 27)
+- Shpërndarje fare             → Servo 3 (Pi GPIO 22)
+
+Servo motorët kontrollohen nga Raspberry Pi GPIO.
+sensor_data['robot_action'] vendoset live → fytyra reagon.
 """
 
 import threading
 import time
 from servo_controller import ServoController
-from arduino_comm import ArduinoComm
 
 
 class FarmingOperations:
     """Koordinator i operacioneve të kultivimit."""
     
-    def __init__(self, arduino: ArduinoComm):
+    def __init__(self, arduino=None, sensor_data: dict = None):
         self.arduino = arduino
         self.servos = ServoController(arduino)
+        self.sensor_data = sensor_data or {}   # referenca e shared dict
         self.is_plowing = False
         self.is_scanning = False
         self.plow_thread = None
         self.scan_thread = None
+
+    def _set_action(self, action: str):
+        """Vendos veprimin aktual të robotit → fytyra reagon live."""
+        self.sensor_data['robot_action'] = action
     
     # ────────────────────────────────────────────────────────────────
     # PLUGUNIM (Hapur dheu)
     # ────────────────────────────────────────────────────────────────
     
     def start_plowing(self, interval: float = 3.0):
-        """
-        Nis plugunimin e vazhdueshëm.
-        Cikli: 180° → 150° (hap) → 180° (mbyll)
-        Përsërit çdo 'interval' sekonda.
-        """
         if self.is_plowing:
             print("[FARM] Plugunimi është tashmë aktiv")
             return
-        
         self.is_plowing = True
+        self._set_action('PLOWING')
         print(f"[FARM] Nis plugunim të vazhdueshëm (çdo {interval}s)")
         self.servos.start_continuous_plow(interval=interval)
     
     def stop_plowing(self):
-        """Ndalon plugunimin."""
         if not self.is_plowing:
-            print("[FARM] Plugunimi nuk është aktiv")
             return
-        
         self.is_plowing = False
+        self._set_action('MOVING')
         self.servos.stop_plow()
         print("[FARM] Plugunimi i ndërprerë")
     
@@ -58,52 +57,39 @@ class FarmingOperations:
     # ────────────────────────────────────────────────────────────────
     
     def start_soil_monitoring(self, interval: float = 30.0):
-        """
-        Nis monitorimin periodik të tokës.
-        Çdo 'interval' sekonda, uli sensorin, lexo, dhe ngre prap.
-        """
         if self.is_scanning:
             print("[FARM] Monitorimi i sensorit është tashmë aktiv")
             return
-        
         self.is_scanning = True
         print(f"[FARM] Nis monitorim të sensorit (çdo {interval}s)")
         self.servos.start_periodic_scan(interval=interval)
     
     def stop_soil_monitoring(self):
-        """Ndalon monitorimin e sensorit."""
         if not self.is_scanning:
-            print("[FARM] Monitorimi i sensorit nuk është aktiv")
             return
-        
         self.is_scanning = False
         self.servos.stop_scan()
         print("[FARM] Monitorimi i sensorit i ndërprerë")
     
     def manual_soil_scan(self):
         """Bëj një skanim manual të sensorit menjëherë."""
+        self._set_action('SCANNING')
         print("[FARM] Manual soil scan...")
         self.servos.sensor_scan()
+        self._set_action('MOVING')
     
     # ────────────────────────────────────────────────────────────────
     # SHPËRNDARJE FARE (Kazan)
     # ────────────────────────────────────────────────────────────────
     
     def dispense_seeds(self, amount: str = "normal"):
-        """
-        Shpërnda fare sipas sasisë.
-        
-        amount: "light" (1 pulse), "normal" (3 pulse), "heavy" (5 pulse)
-        """
-        pulses = {
-            "light": 1,
-            "normal": 3,
-            "heavy": 5,
-        }.get(amount, 3)
-        
+        """Shpërnda fare sipas sasisë — vendos robot_action=PLANTING."""
+        pulses = {"light": 1, "normal": 3, "heavy": 5}.get(amount, 3)
+        self._set_action('PLANTING')
         print(f"[FARM] Shpërndarje fare ({amount}, {pulses} pulse)")
         self.servos.hopper_dispense(pulses)
-    
+        self._set_action('MOVING')
+
     # ────────────────────────────────────────────────────────────────
     # SKENARË KOMPLEKSE
     # ────────────────────────────────────────────────────────────────

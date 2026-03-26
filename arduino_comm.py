@@ -115,3 +115,34 @@ class ArduinoComm:
             "humidity":  round(random.uniform(35, 80), 1),
             "distance":  round(random.uniform(25, 200), 1),
         }
+
+    def read_data(self) -> dict:
+        """
+        Lexo një paketë të dhënash nga Arduino.
+        Kthen dict me të gjitha fushat ose None nëse nuk ka të dhëna.
+        Thirrje kryesore nga arduino_thread në main.py dhe pi_main.py.
+        """
+        import math, random, time
+        line = self.read_line()
+        if line:
+            kind, data = self.parse(line)
+            if kind == 'DATA' and data:
+                raw = data['moisture']
+                pct = round((1 - raw / 1023) * 100, 1)
+                if   raw < 300: status = 'WET'
+                elif raw < 500: status = 'OPTIMAL'
+                elif raw < 700: status = 'DRY'
+                else:           status = 'CRITICAL'
+                return {
+                    'moisture_raw':    raw,
+                    'moisture_pct':    pct,
+                    'moisture_status': status,
+                    'soil_temp':       data['soil_temp'],
+                    'air_temp':        data['air_temp'],
+                    'humidity':        data['humidity'],
+                    'distance':        data['distance'],
+                    'can_plant':       status == 'OPTIMAL',
+                    'crop':            'tomatoes',
+                }
+        # Nëse nuk ka të dhëna ende, kthe None
+        return None

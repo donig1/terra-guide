@@ -19,11 +19,11 @@ SERVO_PIN_ARDUINO  = 9
 FARM = {
     "crop":               "domate",
     "field_area_m2":      500,
-    "water_cost_eur_m3":  0.35,
+    "seed_spacing_cm":    40,      # distanca mes farave (cm)
+    "optimal_depth_cm":   3,       # thellesia e mbjelljes (cm)
     "market_price_kg":    0.80,
-    "pump_l_per_min":     15,
-    "pump_time_min":      20,
     "yield_kg_m2":        4,
+    "stops_per_row":      10,      # pikat e matjes per rresht
 }
 
 # ── Pragjet Sensorësh ──────────────────────
@@ -46,6 +46,11 @@ THRESHOLDS = {
     # Pengesa
     "obstacle_cm":        20,
 }
+
+# ── Raspberry Pi (IP ne rrjet lokal) ───────
+# Ndrysho kete me IP-ne e vertete te Raspberry Pi!
+# (komanda: hostname -I  ne terminal te Pi)
+PI_IP   = "192.168.1.100"
 
 # ── Dashboard ──────────────────────────────
 DASHBOARD_PORT = 5000

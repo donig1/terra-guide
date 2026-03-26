@@ -18,6 +18,11 @@ import math
 import random
 
 from face_engine import run_face
+try:
+    import dashboard as _dash
+    _DASH_OK = True
+except Exception:
+    _DASH_OK = False
 
 # ── Shared state ─────────────────────────────────────────────────────────
 cmd_queue   = queue.Queue()    # chatbot → face
@@ -61,11 +66,15 @@ def arduino_thread():
                 'air_temp':        round(24 + math.sin(t * 0.13) * 3, 1),
                 'humidity':        round(60 + math.sin(t * 0.22) * 14, 0),
                 'distance':        round(80 + random.uniform(-10, 10), 1),
-                'pump_active':     status in ('DRY', 'CRITICAL'),
+                'can_plant':       status == 'OPTIMAL',
                 'crop':            'tomatoes',
             }
 
         sensor_data.update(data)
+        # Push live data to dashboard
+        if _DASH_OK:
+            try: _dash._live_sensors.update(data)
+            except Exception: pass
         time.sleep(0.5)
 
 
@@ -88,17 +97,59 @@ def chatbot_thread(farming_ops=None):
         _demo_mode()
 
 
+def auto_emotion_thread():
+    """Monitoron sensor_data live (cdo 2s) dhe ndryshon fytyren automatikisht."""
+    _last = {'state': None}
+
+    def _emit(state, text):
+        if state != _last['state']:
+            _last['state'] = state
+            cmd_queue.put({'state': state, 'text': text, 'mic': False})
+
+    while True:
+        time.sleep(2)
+        if not sensor_data:
+            _emit('idle', '')
+            continue
+
+        status   = sensor_data.get('moisture_status', 'OPTIMAL')
+        pct      = float(sensor_data.get('moisture_pct', 50))
+        action   = sensor_data.get('robot_action', 'MOVING')   # vendoset nga farming thread
+        obstacle = float(sensor_data.get('distance', 999))
+        can_plant = sensor_data.get('can_plant', False)
+
+        # Prioritet: pengesa > veprim aktiv > statusi i tokës
+        if obstacle < 20:
+            _emit('surprised', f'Pengesë {obstacle:.0f}cm! Duke u ndalur...')
+        elif action == 'SCANNING':
+            _emit('thinking', f'Duke skanuar tokën... lagështi {pct:.0f}%')
+        elif action == 'PLANTING':
+            _emit('happy', f'Toka optimale — duke mbjellur faren! {pct:.0f}%')
+        elif action == 'PLOWING':
+            _emit('talking', 'Duke pluguar tokën...')
+        elif not can_plant and status == 'DRY':
+            _emit('sad', f'Toka e thatë ({pct:.0f}%) — duke kaluar.')
+        elif not can_plant and status == 'WET':
+            _emit('confused', f'Toka shumë e lagët ({pct:.0f}%) — duke kaluar.')
+        elif not can_plant and status == 'CRITICAL':
+            _emit('scared', f'Gjendje kritike ({pct:.0f}%) — duke kapërcyer!')
+        elif can_plant:
+            _emit('happy', f'Kushte optimale {pct:.0f}% — e gatshme për mbjellje!')
+        else:
+            _emit('idle', '')
+
+
 def _demo_mode():
     """Fallback demo if chatbot fails — cycles through messages."""
     print("[Chatbot] Running in demo mode (no voice)")
     MSGS = [
-        ('happy',    "Good morning! I am Terra Guide, your field assistant."),
-        ('talking',  "Soil moisture is currently optimal for tomatoes."),
-        ('thinking', "Analyzing temperature and humidity trends..."),
-        ('sad',      "Moisture levels are starting to drop. Monitor closely."),
-        ('surprised',"Obstacle detected just ahead! Stopping now."),
-        ('laughing', "Great news — rain is forecast for tomorrow!"),
-        ('angry',    "Critical alert! Pump activated immediately."),
+        ('happy',    "Miremengjes! Une jam Terra Guide, asistenti juaj bujqesor."),
+        ('happy',    "Toka eshte e pershtashme — duke mbjellur faren!"),
+        ('thinking', "Duke analizuar lageshti, temperature dhe kushtet e tokës..."),
+        ('sad',      "Toka eshte e thate — duke kaluar tek vendi tjeter."),
+        ('surprised',"Pengesë e zbuluar! Duke u ndalur..."),
+        ('confused', "Toka shume e laget — nuk mund te mbjellem ketu."),
+        ('scared',   "Gjendje kritike! Duke kapercyer kete zone."),
         ('idle',     ""),
     ]
     i = 0
@@ -126,15 +177,23 @@ if __name__ == '__main__':
     if arduino:
         try:
             from farming_operations import FarmingOperations
-            farming_ops = FarmingOperations(arduino)
+            farming_ops = FarmingOperations(arduino, sensor_data=sensor_data)
             print("[Main] Farming operations initialized ✓")
         except Exception as e:
             print(f"[Main] Farming operations error: {e}")
 
-    t1 = threading.Thread(target=arduino_thread, daemon=True, name='Arduino')
-    t2 = threading.Thread(target=chatbot_thread, args=(farming_ops,), daemon=True, name='ChatBot')
+    t1 = threading.Thread(target=arduino_thread,  daemon=True, name='Arduino')
+    t2 = threading.Thread(target=chatbot_thread,   args=(farming_ops,), daemon=True, name='ChatBot')
+    t3 = threading.Thread(target=auto_emotion_thread, daemon=True, name='AutoEmotion')
     t1.start()
     t2.start()
+    t3.start()
+
+    # Dashboard web server in background thread
+    if _DASH_OK:
+        t4 = threading.Thread(target=_dash.run_dashboard, daemon=True, name='Dashboard')
+        t4.start()
+        print('[Dashboard] Running at http://localhost:5000')
 
     # pygame must run on main thread
     run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)
