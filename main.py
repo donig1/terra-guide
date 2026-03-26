@@ -18,11 +18,6 @@ import math
 import random
 
 from face_engine import run_face
-try:
-    import dashboard as _dash
-    _DASH_OK = True
-except Exception:
-    _DASH_OK = False
 
 # ── Shared state ─────────────────────────────────────────────────────────
 cmd_queue   = queue.Queue()    # chatbot → face
@@ -71,10 +66,6 @@ def arduino_thread():
             }
 
         sensor_data.update(data)
-        # Push live data to dashboard
-        if _DASH_OK:
-            try: _dash._live_sensors.update(data)
-            except Exception: pass
         time.sleep(0.5)
 
 
@@ -120,21 +111,21 @@ def auto_emotion_thread():
 
         # Prioritet: pengesa > veprim aktiv > statusi i tokës
         if obstacle < 20:
-            _emit('surprised', f'Pengesë {obstacle:.0f}cm! Duke u ndalur...')
+            _emit('surprised', f'Obstacle {obstacle:.0f}cm! Stopping...')
         elif action == 'SCANNING':
-            _emit('thinking', f'Duke skanuar tokën... lagështi {pct:.0f}%')
+            _emit('thinking', f'Scanning soil... moisture {pct:.0f}%')
         elif action == 'PLANTING':
-            _emit('happy', f'Toka optimale — duke mbjellur faren! {pct:.0f}%')
+            _emit('happy', f'Optimal soil — planting seed! {pct:.0f}%')
         elif action == 'PLOWING':
-            _emit('talking', 'Duke pluguar tokën...')
+            _emit('talking', 'Plowing the soil...')
         elif not can_plant and status == 'DRY':
-            _emit('sad', f'Toka e thatë ({pct:.0f}%) — duke kaluar.')
+            _emit('sad', f'Soil too dry ({pct:.0f}%) — moving on.')
         elif not can_plant and status == 'WET':
-            _emit('confused', f'Toka shumë e lagët ({pct:.0f}%) — duke kaluar.')
+            _emit('confused', f'Soil too wet ({pct:.0f}%) — moving on.')
         elif not can_plant and status == 'CRITICAL':
-            _emit('scared', f'Gjendje kritike ({pct:.0f}%) — duke kapërcyer!')
+            _emit('scared', f'Critical condition ({pct:.0f}%) — skipping!')
         elif can_plant:
-            _emit('happy', f'Kushte optimale {pct:.0f}% — e gatshme për mbjellje!')
+            _emit('happy', f'Optimal conditions {pct:.0f}% — ready to plant!')
         else:
             _emit('idle', '')
 
@@ -143,13 +134,13 @@ def _demo_mode():
     """Fallback demo if chatbot fails — cycles through messages."""
     print("[Chatbot] Running in demo mode (no voice)")
     MSGS = [
-        ('happy',    "Miremengjes! Une jam Terra Guide, asistenti juaj bujqesor."),
-        ('happy',    "Toka eshte e pershtashme — duke mbjellur faren!"),
-        ('thinking', "Duke analizuar lageshti, temperature dhe kushtet e tokës..."),
-        ('sad',      "Toka eshte e thate — duke kaluar tek vendi tjeter."),
-        ('surprised',"Pengesë e zbuluar! Duke u ndalur..."),
-        ('confused', "Toka shume e laget — nuk mund te mbjellem ketu."),
-        ('scared',   "Gjendje kritike! Duke kapercyer kete zone."),
+        ('happy',    "Good morning! I am Terra Guide, your agricultural assistant."),
+        ('happy',    "Soil conditions are great — planting now!"),
+        ('thinking', "Analyzing moisture, temperature and soil conditions..."),
+        ('sad',      "Soil is too dry — moving to the next spot."),
+        ('surprised',"Obstacle detected! Stopping..."),
+        ('confused', "Soil is too wet — cannot plant here."),
+        ('scared',   "Critical condition! Skipping this zone."),
         ('idle',     ""),
     ]
     i = 0
@@ -188,12 +179,6 @@ if __name__ == '__main__':
     t1.start()
     t2.start()
     t3.start()
-
-    # Dashboard web server in background thread
-    if _DASH_OK:
-        t4 = threading.Thread(target=_dash.run_dashboard, daemon=True, name='Dashboard')
-        t4.start()
-        print('[Dashboard] Running at http://localhost:5000')
 
     # pygame must run on main thread
     run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)

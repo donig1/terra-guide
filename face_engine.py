@@ -1,13 +1,13 @@
 ﻿"""
-Terra Guide — face_engine.py  (v4 — Bigger Face + New HUD + Voice Ready)
+Terra Guide — face_engine.py  (v5 — 4K Premium Redesign)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Fytyra e madhe — zë 75% të lartësisë, e centruar
-• Pa panele anash — të gjitha të dhënat vetëm në HUD poshtë
-• HUD 6 kolona: lagështia, temp tokë, temp ajri, lagështia ℜ, pompë, zëri
-• Voice state i integruar: listening / speaking / idle
-• Thread-safe queue: chatbot/voice calls set_face() nga çdo thread
-• Auto-detect resolution — punon në çdo ekran
-• 60 FPS pygame loop
+• 4K-quality render — works on any resolution, scales perfectly
+• Deep-space aurora background with animated nebula layers
+• Glassmorphism HUD panels with neon glow borders
+• Layered neon halos, rotating radar ring, particle system
+• Premium font stack: Segoe UI / Arial / fallback
+• Voice state integrated: listening / speaking / idle
+• Thread-safe queue, 60 FPS
 """
 
 import pygame
@@ -18,37 +18,42 @@ import queue
 import time
 import os
 
-# ─── Pygame init i hershëm — për të marrë resolution reale ────────────────
+# ─── Pygame init ──────────────────────────────────────────────────────────
 pygame.init()
 _info = pygame.display.Info()
 
-# ─── Screen ────────────────────────────────────────────────────────────────
+# ─── Screen ───────────────────────────────────────────────────────────────
 W         = _info.current_w
 H         = _info.current_h
-HUD_H     = 115          # shiriti i poshtëm me sensorë
-SUB_H     = 46           # shiriti subtitle mbi HUD
-FACE_AREA = H - HUD_H - SUB_H   # zona ku shfaqet fytyra
+HUD_H     = 130          # bottom sensor bar
+SUB_H     = 52           # subtitle bar above HUD
+TOP_H     = 48           # top title bar
+FACE_AREA = H - HUD_H - SUB_H - TOP_H
 
-# Fytyra — 60% e lartësisë së zonës
-FACE_H    = int(FACE_AREA * 0.6)
+# Face — 72% of face area height, always square, centered
+FACE_H    = int(FACE_AREA * 0.72)
 FACE_W    = FACE_H
 FACE_X    = (W - FACE_W) // 2
-FACE_Y    = (FACE_AREA - FACE_H) // 2 - 8
+FACE_Y    = TOP_H + (FACE_AREA - FACE_H) // 2
 
-# ─── Palette ───────────────────────────────────────────────────────────────
-SKY_TOP  = (  4,  8,  18)
-SKY_BOT  = (  6, 14,  10)
-COL_TEXT = (160, 215, 130)
-COL_DIM  = ( 60,  90,  60)
-COL_GOOD = ( 40, 220,  80)
-COL_WARN = (220, 170,  25)
-COL_BAD  = (220,  45,  35)
-HUD_EDGE = (  0, 160,  70)
-SUB_TEXT = (200, 240, 175)
-MIC_ON   = ( 50, 220,  90)
-MIC_OFF  = ( 50,  50,  50)
-ACCENT   = (  0, 200,  90)
-ACCENT2  = (  0, 130, 220)
+# ─── Premium Palette ──────────────────────────────────────────────────────
+BG_DEEP   = (  3,  4, 14)   # near-black deep space
+BG_MID    = (  5,  9, 22)
+COL_TEXT  = (185, 230, 200)
+COL_DIM   = ( 55,  80,  60)
+COL_TITLE = (220, 255, 230)
+COL_GOOD  = ( 30, 230,  95)
+COL_WARN  = (240, 175,  20)
+COL_BAD   = (235,  45,  40)
+ACCENT    = (  0, 210, 100)  # primary neon green
+ACCENT2   = ( 30, 150, 255)  # electric blue
+ACCENT3   = (130,  60, 255)  # deep purple (thinking)
+ACCENT4   = (255, 100,  30)  # amber (warning/confused)
+GLASS_BG  = (  8, 18, 12)   # glassmorphism card bg
+SUB_TEXT  = (210, 248, 220)
+MIC_ON    = ( 40, 225, 100)
+MIC_OFF   = ( 40,  50,  45)
+SKY_TOP   = BG_DEEP
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
@@ -171,42 +176,64 @@ class FarmerFace:
 
         random.seed(7)
 
-        # Ambient particles (fireflies / spores)
+        # Ambient particles — warm morning fireflies / golden spores
         self._ptcls = [{
             'x':      random.uniform(0, W),
-            'y':      random.uniform(0, FACE_AREA),
-            'vy':     random.uniform(-22, -5),
-            'vx':     random.uniform(-2.5, 2.5),
-            'sz':     random.uniform(1.0, 2.8),
-            'bright': random.random() > 0.62,
+            'y':      random.uniform(0, H),
+            'vy':     random.uniform(-18, -4),
+            'vx':     random.uniform(-2.0, 2.0),
+            'sz':     random.uniform(1.0, 3.2),
+            'bright': random.random() > 0.55,
             'ph':     random.uniform(0, math.tau),
-        } for _ in range(55)]
+            'col':    random.choice([
+                (255, 200, 80),  # golden
+                (255, 140, 50),  # warm orange
+                (255, 225, 120), # pale gold
+                (200, 255, 170), # morning green
+                (240, 165, 80),  # amber
+            ]),
+        } for _ in range(80)]
 
-        # Hex grid cache
+        # Grid + star caches
         self._hex_surf  = None
         self._hex_built = False
 
-        # Background image (opsionale — vendos assets/bg.png)
+        # Baked backgrounds (runs once at startup)
+        self._star_surf   = self._bake_star_field()
+        self._morning_bg  = self._bake_morning_bg()
+        self._horizon_srf = self._bake_horizon()
+
+        # Background image (optional — put assets/bg.png to override)
         self._bg_img = None
         _bgp = os.path.join(BASE, 'assets', 'bg.png')
         if os.path.exists(_bgp):
             try:
                 _bgi = pygame.image.load(_bgp).convert()
-                self._bg_img = pygame.transform.smoothscale(_bgi, (W, FACE_AREA))
+                self._bg_img = pygame.transform.smoothscale(_bgi, (W, H))
                 print('[Face] Loaded bg.png')
             except Exception as e:
                 print(f'[Face] bg.png error: {e}')
 
-        # Fonts
-        self.fn_xs  = pygame.font.SysFont('monospace', 12, bold=True)
-        self.fn_s   = pygame.font.SysFont('monospace', 14, bold=True)
-        self.fn_m   = pygame.font.SysFont('monospace', 17, bold=True)
-        self.fn_l   = pygame.font.SysFont('monospace', 22, bold=True)
-        self.fn_xl  = pygame.font.SysFont('monospace', 30, bold=True)
-        try:
-            self.fn_sub = pygame.font.SysFont('segoeui', 20)
-        except:
-            self.fn_sub = pygame.font.SysFont('monospace', 17)
+        # ── Premium font stack ─────────────────────────────────────────
+        def _font(names, size, bold=False):
+            for n in names:
+                try:
+                    f = pygame.font.SysFont(n, size, bold=bold)
+                    if f: return f
+                except Exception:
+                    pass
+            return pygame.font.SysFont('monospace', size, bold=bold)
+
+        UI   = ['segoeui', 'arial', 'helvetica', 'monospace']
+        MONO = ['consolas', 'couriernew', 'monospace']
+
+        self.fn_xs    = _font(MONO,  13, bold=True)  # HUD labels / badges
+        self.fn_s     = _font(MONO,  15, bold=True)  # badge text
+        self.fn_m     = _font(UI,    18, bold=True)  # general UI
+        self.fn_l     = _font(UI,    24, bold=True)  # overlay labels
+        self.fn_xl    = _font(UI,    38, bold=True)  # HUD main values
+        self.fn_sub   = _font(UI,    22)             # subtitle
+        self.fn_title = _font(UI,    26, bold=True)  # top bar title
 
         self._load_faces()
 
@@ -262,24 +289,106 @@ class FarmerFace:
                         math.pi+0.3, math.tau-0.3, 4)
         return s
 
-    # ── Hex grid ──────────────────────────────────────────────────────────
+    # ── Hex grid (full-screen, subtle premium lines) ──────────────────────
     def _bake_hex_grid(self):
-        surf = pygame.Surface((W, FACE_AREA), pygame.SRCALPHA)
-        sz   = 38
+        surf = pygame.Surface((W, H), pygame.SRCALPHA)
+        sz   = max(32, W // 42)   # responsive hex size
         cw   = sz * math.sqrt(3)
         rh   = sz * 1.5
-        rows = int(FACE_AREA / rh) + 3
+        rows = int(H / rh) + 3
         cols = int(W / cw) + 3
         for row in range(-1, rows):
             for col in range(-1, cols):
                 cx2 = col*cw + (cw/2 if row%2 else 0)
                 cy2 = row * rh
                 pts = [
-                    (int(cx2 + sz*0.80*math.cos(math.pi/6 + i*math.pi/3)),
-                     int(cy2 + sz*0.80*math.sin(math.pi/6 + i*math.pi/3)))
+                    (int(cx2 + sz*0.82*math.cos(math.pi/6 + i*math.pi/3)),
+                     int(cy2 + sz*0.82*math.sin(math.pi/6 + i*math.pi/3)))
                     for i in range(6)
                 ]
-                pygame.draw.polygon(surf, (0, 175, 65, 14), pts, 1)
+                pygame.draw.polygon(surf, (0, 160, 70, 11), pts, 1)
+        return surf
+
+    # ── Star field (200 stars, baked once) ───────────────────────────────
+    def _bake_star_field(self):
+        surf = pygame.Surface((W, H), pygame.SRCALPHA)
+        rng  = random.Random(42)
+        for _ in range(200):
+            sx = rng.randint(0, W-1)
+            sy = rng.randint(0, H-1)
+            sz = rng.choice([1, 1, 1, 2, 2, 3])
+            br = rng.randint(70, 210)
+            tint = rng.randint(0, 2)
+            if tint == 0:   col = (br, br, br)
+            elif tint == 1: col = (int(br*0.55), br, int(br*0.65))
+            else:           col = (int(br*0.60), int(br*0.75), br)
+            pygame.draw.circle(surf, (*col, br), (sx, sy), max(1, sz-1))
+            if sz == 3:
+                pygame.draw.line(surf, (*col, br//4), (sx-5, sy), (sx+5, sy), 1)
+                pygame.draw.line(surf, (*col, br//4), (sx, sy-5), (sx, sy+5), 1)
+        return surf
+
+    # ── Morning sky gradient (baked — runs once at startup) ──────────────
+    def _bake_morning_bg(self):
+        """Dawn sky: midnight blue → indigo → violet → amber → gold horizon."""
+        surf  = pygame.Surface((W, H))
+        stops = [
+            (0.00, (  8, 10, 42)),
+            (0.18, ( 20, 15, 64)),
+            (0.35, ( 58, 22, 78)),
+            (0.52, (145, 50, 55)),
+            (0.66, (210, 90, 24)),
+            (0.78, (242, 148, 18)),
+            (0.89, (252, 198, 55)),
+            (1.00, (195, 140, 78)),
+        ]
+        for y in range(H):
+            tt  = y / max(1, H - 1)
+            col = stops[-1][1]
+            for j in range(len(stops) - 1):
+                ta, ca = stops[j]; tb, cb = stops[j+1]
+                if ta <= tt < tb:
+                    f   = (tt - ta) / max(1e-6, tb - ta)
+                    col = (int(ca[0] + (cb[0]-ca[0])*f),
+                           int(ca[1] + (cb[1]-ca[1])*f),
+                           int(ca[2] + (cb[2]-ca[2])*f))
+                    break
+            pygame.draw.line(surf, col, (0, y), (W, y))
+        return surf
+
+    # ── Rolling hills horizon silhouette (baked) ─────────────────────────
+    def _bake_horizon(self):
+        """Dark earth hills with a warm sunrise rim glow along the hilltop."""
+        surf = pygame.Surface((W, H), pygame.SRCALPHA)
+        hy   = int(H * 0.80)
+
+        # Organic hill contour from three overlapping sine waves
+        pts = [(0, H)]
+        for x in range(0, W + 1, 3):
+            yh = hy + int(
+                26 * math.sin(x * 0.0072 + 1.0) +
+                13 * math.sin(x * 0.0185 + 0.7) +
+                 6 * math.sin(x * 0.0410 + 2.4)
+            )
+            pts.append((x, yh))
+        pts.append((W, H))
+
+        # Dark earth body
+        pygame.draw.polygon(surf, (10, 20, 12, 248), pts)
+
+        # Warm sunrise rim glow along hilltop
+        for k in range(18):
+            rim = pygame.Surface((W, 2), pygame.SRCALPHA)
+            a   = min(255, int((18 - k) * 10))
+            pygame.draw.rect(rim, (255, 190, 70, a), (0, 0, W, 2))
+            surf.blit(rim, (0, hy - 9 + k))
+
+        # Foreground darker strip at very bottom
+        fh = int(H * 0.10)
+        fg = pygame.Surface((W, fh), pygame.SRCALPHA)
+        pygame.draw.rect(fg, (6, 14, 6, 235), (0, 0, W, fh))
+        surf.blit(fg, (0, H - fh))
+
         return surf
 
     # ── API publike ───────────────────────────────────────────────────────
@@ -329,7 +438,7 @@ class FarmerFace:
             p['x'] += p['vx'] * dt
             p['y'] += p['vy'] * dt
             if p['y'] < -8:
-                p['y'] = FACE_AREA + 6
+                p['y'] = H + 6
                 p['x'] = random.uniform(0, W)
             if p['x'] < -5 or p['x'] > W + 5:
                 p['x'] = random.uniform(0, W)
@@ -364,165 +473,288 @@ class FarmerFace:
         self._draw_hud(s)
         self._draw_overlay(s)
 
-    # ── Background ────────────────────────────────────────────────────────
+    # ── Helper: state color ───────────────────────────────────────────────
+    def _state_color(self):
+        return {
+            'happy':     COL_GOOD,
+            'angry':     COL_BAD,
+            'sad':       ACCENT2,
+            'talking':   ACCENT,
+            'listening': ACCENT2,
+            'thinking':  ACCENT3,
+            'surprised': COL_WARN,
+            'laughing':  COL_WARN,
+            'scared':    ACCENT2,
+            'sleep':     COL_DIM,
+            'confused':  ACCENT4,
+        }.get(self.state, ACCENT)
+
+    # ── Background — morning sky + crepuscular rays + mist + hills ───────
     def _draw_bg(self, s):
-        # Build hex grid herën e parë
         if not self._hex_built:
             self._hex_surf  = self._bake_hex_grid()
             self._hex_built = True
 
-        # 1. Sfond gradient ose bg.png
+        sc = self._state_color()
+        cx0 = FACE_X + FACE_W // 2
+        cy0 = FACE_Y + FACE_H // 2
+
+        # 1. Morning sky gradient (or custom bg.png override)
         if self._bg_img:
             s.blit(self._bg_img, (0, 0))
         else:
-            for y in range(FACE_AREA):
-                tt = y / max(1, FACE_AREA)
-                pygame.draw.line(s,
-                    (int(lerp(3,5,tt)), int(lerp(7,11,tt)), int(lerp(15,9,tt))),
-                    (0, y), (W, y))
+            s.blit(self._morning_bg, (0, 0))
 
-        # 2. Hex grid mbi sfond
+        # 2. Stars (visible in upper portion of pre-dawn sky)
+        if self._star_surf:
+            st = self._star_surf.copy()
+            # Fade stars out in lower half — sunrise washes them away
+            mask = pygame.Surface((W, H), pygame.SRCALPHA)
+            for y in range(H):
+                fade = clamp((y / H - 0.25) / 0.40, 0, 1)
+                alpha = int(255 * fade)
+                pygame.draw.line(mask, (0, 0, 0, alpha), (0, y), (W, y))
+            st.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_SUB)
+            s.blit(st, (0, 0))
+
+        # 3. Sunrise solar disk (warm golden orb at horizon)
+        sun_x = cx0
+        sun_y = int(H * 0.80)
+        sun_r = max(38, W // 30)
+        pulse_sun = 0.90 + 0.10 * math.sin(self.t * 0.55)
+        for sr in range(sun_r + int(sun_r*1.8), sun_r - 2, -8):
+            fade = clamp(1.0 - (sr - sun_r) / (sun_r * 1.8), 0, 1)
+            a_sun = max(0, min(255, int(fade * fade * 90 * pulse_sun)))
+            gs = pygame.Surface((sr*2, sr*2), pygame.SRCALPHA)
+            pygame.draw.circle(gs, (255, 200, 60, a_sun), (sr, sr), sr)
+            s.blit(gs, (sun_x - sr, sun_y - sr), special_flags=pygame.BLEND_RGBA_ADD)
+        # hard disk
+        pygame.draw.circle(s, (255, 230, 140), (sun_x, sun_y), sun_r)
+        pygame.draw.circle(s, (255, 248, 200), (sun_x, sun_y), max(1, sun_r - 6))
+
+        # 4. Crepuscular rays from sun
+        NUM_RAYS = 14
+        for ri in range(NUM_RAYS):
+            angle = -math.pi / 2 + (ri - NUM_RAYS//2) * (math.pi / (NUM_RAYS * 1.1))
+            ray_len = int(H * 1.2)
+            spread = sun_r // 2
+            ox1 = sun_x + int(math.cos(angle - 0.06) * spread)
+            oy1 = sun_y + int(math.sin(angle - 0.06) * spread)
+            ox2 = sun_x + int(math.cos(angle + 0.06) * spread)
+            oy2 = sun_y + int(math.sin(angle + 0.06) * spread)
+            ex1 = sun_x + int(math.cos(angle - 0.06) * ray_len)
+            ey1 = sun_y + int(math.sin(angle - 0.06) * ray_len)
+            ex2 = sun_x + int(math.cos(angle + 0.06) * ray_len)
+            ey2 = sun_y + int(math.sin(angle + 0.06) * ray_len)
+            ray_pts = [
+                (ox1, oy1), (ox2, oy2), (ex2, ey2), (ex1, ey1)
+            ]
+            # Pulsing brightness
+            pulse_r = 0.65 + 0.35 * math.sin(self.t * 0.28 + ri * 0.7)
+            a_ray = max(0, min(255, int(22 * pulse_r)))
+            ray_s = pygame.Surface((W, H), pygame.SRCALPHA)
+            pygame.draw.polygon(ray_s, (255, 215, 100, a_ray), ray_pts)
+            s.blit(ray_s, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
+        # 5. Morning mist layers near horizon
+        mist_y = int(H * 0.74)
+        for mk in range(6):
+            mh = max(1, int(H * 0.06) - mk * 8)
+            my = mist_y + mk * 9
+            ma = max(0, min(255, 55 - mk * 8))
+            mist = pygame.Surface((W, mh), pygame.SRCALPHA)
+            pygame.draw.rect(mist, (220, 200, 170, ma), (0, 0, W, mh))
+            s.blit(mist, (0, my))
+
+        # 6. Rolling hills silhouette
+        if self._horizon_srf:
+            s.blit(self._horizon_srf, (0, 0))
+
+        # 7. Hex grid overlay (subtle — gives tech feel over natural bg)
         if self._hex_surf:
             s.blit(self._hex_surf, (0, 0))
 
-        # 3. Glow rings prapa fytyrës
-        cx0 = FACE_X + FACE_W // 2
-        cy0 = FACE_Y + FACE_H // 2
-        p0  = 0.35 + 0.12 * math.sin(self.t * 1.05)
-        state_col = {
-            'happy':    COL_GOOD, 'angry':    COL_BAD,
-            'sad':      ACCENT2,  'talking':  ACCENT,
-            'listening':ACCENT2,  'thinking': (170,90,220),
-            'surprised':COL_WARN, 'laughing': COL_WARN,
-            'scared':   ACCENT2,
-        }.get(self.state, ACCENT)
-
-        for i, rr in enumerate([300, 240, 180, 130]):
-            a = max(0, int(p0 * (20 - i*4)))
+        # 8. Outer glow behind face (warm gold tinted)
+        p0 = 0.38 + 0.14 * math.sin(self.t * 0.95)
+        warm_col = (
+            min(255, sc[0] + 40),
+            min(255, sc[1] + 20),
+            min(255, sc[2]),
+        )
+        for i, rr in enumerate([int(FACE_W*0.72), int(FACE_W*0.60),
+                                  int(FACE_W*0.48), int(FACE_W*0.36)]):
+            a = max(0, int(p0 * (22 - i*5)))
             gs = pygame.Surface((rr*2, rr*2), pygame.SRCALPHA)
-            pygame.draw.circle(gs, (*state_col, a), (rr, rr), rr, 3-min(i,2))
+            pygame.draw.circle(gs, (*warm_col, a), (rr, rr), rr, max(1, 3-i))
             s.blit(gs, (cx0-rr, cy0-rr))
 
-        # 4. Ambient fireflies
+        # 9. Ambient golden fireflies
         for p in self._ptcls:
-            a2   = int(clamp(
-                (0.5+0.5*math.sin(self.t*0.9+p['ph'])) * (220 if p['bright'] else 75),
-                0, 255))
-            col2 = (155, 255, 195) if p['bright'] else (40, 115, 65)
-            r2   = max(1, int(p['sz']))
-            ps2  = pygame.Surface((r2*2+2, r2*2+2), pygame.SRCALPHA)
-            pygame.draw.circle(ps2, (*col2, a2), (r2+1, r2+1), r2)
+            base_a = 220 if p['bright'] else 80
+            a2 = int(clamp((0.5+0.5*math.sin(self.t*0.85+p['ph'])) * base_a, 0, 255))
+            r2 = max(1, int(p['sz']))
+            if p['bright']:
+                gs2 = pygame.Surface((r2*6+2, r2*6+2), pygame.SRCALPHA)
+                pygame.draw.circle(gs2, (*p['col'], max(0, a2//4)), (r2*3+1, r2*3+1), r2*3)
+                s.blit(gs2, (int(p['x'])-r2*3, int(p['y'])-r2*3))
+            ps2 = pygame.Surface((r2*2+2, r2*2+2), pygame.SRCALPHA)
+            pygame.draw.circle(ps2, (*p['col'], a2), (r2+1, r2+1), r2)
             s.blit(ps2, (int(p['x'])-r2, int(p['y'])-r2))
 
-        # 5. Scan line
-        sy2 = int((self.t * 55) % (FACE_AREA+60)) - 30
-        sc  = pygame.Surface((W, 2), pygame.SRCALPHA)
-        pygame.draw.rect(sc, (*state_col, 10), (0, 0, W, 2))
-        s.blit(sc, (0, sy2))
-
-        # 6. Edge vignette
-        for ew in range(60, 0, -12):
-            a3 = int((60-ew) * 3.5)
-            vs = pygame.Surface((ew, FACE_AREA), pygame.SRCALPHA)
-            pygame.draw.rect(vs, (3,7,14,a3), (0,0,ew,FACE_AREA))
+        # 10. Soft side vignette
+        vw = max(80, W // 10)
+        vstep = max(1, vw // 6)
+        vig_col = (8, 4, 2)
+        for ew in range(vw, 0, -vstep):
+            a3 = min(255, int((vw - ew) * 2.0))
+            vs = pygame.Surface((ew, H), pygame.SRCALPHA)
+            pygame.draw.rect(vs, (*vig_col, a3), (0, 0, ew, H))
             s.blit(vs, (0, 0))
-            s.blit(vs, (W-ew, 0))
-        bf = pygame.Surface((W, 60), pygame.SRCALPHA)
-        for i in range(60):
-            pygame.draw.line(bf, (3,7,14, int(i*3.5)), (0,i), (W,i))
-        s.blit(bf, (0, FACE_AREA-60))
+            s.blit(vs, (W - ew, 0))
 
-        # 7. Corner brackets
-        bsz=30; bth=2
-        for bx, by, dx, dy in [(0,0,1,1),(W,0,-1,1),(0,FACE_AREA,1,-1),(W,FACE_AREA,-1,-1)]:
-            pygame.draw.line(s, ACCENT, (bx,by), (bx+dx*bsz, by), bth)
-            pygame.draw.line(s, ACCENT, (bx,by), (bx, by+dy*bsz), bth)
+        # 11. Corner brackets — warm gold
+        bsz = max(28, W // 50); bth = 2
+        GOLD = (230, 180, 60)
+        for bx, by, dx, dy in [
+            (8, 8, 1, 1), (W-8, 8, -1, 1),
+            (8, H-8, 1, -1), (W-8, H-8, -1, -1),
+        ]:
+            pygame.draw.line(s, GOLD, (bx, by), (bx + dx*bsz, by), bth)
+            pygame.draw.line(s, GOLD, (bx, by), (bx, by + dy*bsz), bth)
+            pygame.draw.circle(s, GOLD, (bx, by), 3)
 
-    # ── Face Image ────────────────────────────────────────────────────────
+    # ── Face Image — premium rings, glow, cross-fade ─────────────────────
     def _draw_face(self, s):
         fx = FACE_X; fy = FACE_Y
         cx = fx + FACE_W // 2
         cy = fy + FACE_H // 2
+        sc = self._state_color()
+        pulse = 0.72 + 0.28 * math.sin(self.t * 2.1)
 
-        state_col = {
-            'happy':    COL_GOOD, 'angry':    COL_BAD,
-            'sad':      ACCENT2,  'talking':  ACCENT,
-            'listening':ACCENT2,  'thinking': (170,90,220),
-            'surprised':COL_WARN, 'laughing': COL_WARN,
-            'scared':   ACCENT2,  'sleep':    COL_DIM,
-        }.get(self.state, ACCENT)
+        # Outer diffuse glow halo
+        halo_r = FACE_W // 2 + int(FACE_W * 0.22)
+        for gw in range(halo_r, halo_r - 55, -11):
+            a4 = max(0, int(pulse * (55 - (halo_r - gw)) * 0.7))
+            gsurf = pygame.Surface((gw*2, gw*2), pygame.SRCALPHA)
+            pygame.draw.circle(gsurf, (*sc, a4), (gw, gw), gw)
+            s.blit(gsurf, (cx - gw, cy - gw), special_flags=pygame.BLEND_RGBA_ADD)
 
-        # Tick ring jashtë
-        tick_r    = FACE_W // 2 + 20
-        tick_surf = pygame.Surface((W, FACE_AREA), pygame.SRCALPHA)
-        for i in range(40):
-            angle = -self.t*0.22 + i*math.tau/40
-            major = (i % 10 == 0)
-            r1 = tick_r + (0 if major else 2)
-            r2 = tick_r + (14 if major else 6)
+        # Radar / tick ring
+        tick_r    = FACE_W // 2 + int(FACE_W * 0.06)
+        tick_surf = pygame.Surface((W, H), pygame.SRCALPHA)
+        num_ticks = 60
+        for i in range(num_ticks):
+            angle = -self.t * 0.18 + i * math.tau / num_ticks
+            major = (i % 15 == 0); mid = (i % 5 == 0)
+            r1 = tick_r + (0 if major else (2 if mid else 4))
+            r2 = tick_r + (18 if major else (10 if mid else 5))
+            brightness = 230 if major else (110 if mid else 45)
+            lw = 2 if major else 1
             x1,y1 = int(cx+r1*math.cos(angle)), int(cy+r1*math.sin(angle))
             x2,y2 = int(cx+r2*math.cos(angle)), int(cy+r2*math.sin(angle))
-            pygame.draw.line(tick_surf, (*state_col, 185 if major else 65),
-                             (x1,y1),(x2,y2), 2 if major else 1)
+            pygame.draw.line(tick_surf, (*sc, brightness), (x1,y1),(x2,y2), lw)
 
-        # Arc progress
-        arc_fill = {'talking':0.85,'listening':0.60,'thinking':0.45,
-                    'happy':1.0,'angry':0.9,'idle':0.30}.get(self.state, 0.5)
-        arc_r2   = tick_r + 18
-        arc_rect = pygame.Rect(cx-arc_r2+1, cy-arc_r2+1, arc_r2*2-2, arc_r2*2-2)
+        # Arc progress fill
+        arc_fill = {'talking':0.88,'listening':0.65,'thinking':0.50,
+                    'happy':1.0,'angry':0.92,'idle':0.28,
+                    'sad':0.40,'confused':0.55}.get(self.state, 0.50)
+        arc_r2   = tick_r + 24
+        arc_rect = pygame.Rect(cx-arc_r2, cy-arc_r2, arc_r2*2, arc_r2*2)
         end_a    = -math.pi/2
-        start_a  = end_a - arc_fill*math.tau
-        pygame.draw.arc(tick_surf, (*state_col, 125), arc_rect, start_a, end_a, 3)
+        start_a  = end_a - arc_fill * math.tau
+        pygame.draw.arc(tick_surf, (*sc, 180), arc_rect, start_a, end_a, 4)
+        pygame.draw.arc(tick_surf, (*sc, 55),  arc_rect.inflate(8,8), start_a, end_a, 9)
+
+        # Secondary inner counter-rotating tick ring
+        tick_r2 = FACE_W // 2 - int(FACE_W * 0.04)
+        for ii in range(32):
+            ang2 = self.t * 0.32 + ii * math.tau / 32
+            r2a  = tick_r2 - 3
+            r2b  = tick_r2 + (11 if ii % 8 == 0 else 5)
+            br2  = 180 if ii % 8 == 0 else 50
+            lw2  = 2 if ii % 8 == 0 else 1
+            x2a,y2a = int(cx+r2a*math.cos(-ang2)), int(cy+r2a*math.sin(-ang2))
+            x2b,y2b = int(cx+r2b*math.cos(-ang2)), int(cy+r2b*math.sin(-ang2))
+            pygame.draw.line(tick_surf, (*sc, br2), (x2a,y2a),(x2b,y2b), lw2)
+
+        # Decorative rotating dashed orbit rings
+        for orb_r, orb_sp, orb_a, orb_dash in [
+            (tick_r + int(FACE_W*0.12),  0.038, 40, 9),
+            (tick_r + int(FACE_W*0.24), -0.022, 24, 6),
+        ]:
+            steps = 200
+            for j in range(steps):
+                ao = self.t * orb_sp + j * math.tau / steps
+                if j % orb_dash < (orb_dash * 2 // 3):
+                    ox = int(cx + orb_r * math.cos(ao))
+                    oy = int(cy + orb_r * math.sin(ao))
+                    pygame.draw.circle(tick_surf, (*sc, orb_a), (ox, oy), 1)
+
         s.blit(tick_surf, (0, 0))
 
-        # Inner glow ring
-        ring_r = FACE_W//2 + 4
-        pulse  = 0.75 + 0.25*math.sin(self.t*2.2)
-        for gw in range(18,0,-5):
-            a4 = max(0, int(pulse*(20-gw)))
-            gs3 = pygame.Surface((ring_r*2+gw*2, ring_r*2+gw*2), pygame.SRCALPHA)
-            pygame.draw.circle(gs3, (*state_col, a4), (ring_r+gw, ring_r+gw), ring_r+gw, 1)
-            s.blit(gs3, (cx-ring_r-gw, cy-ring_r-gw))
-        rs = pygame.Surface(((ring_r+2)*2,(ring_r+2)*2), pygame.SRCALPHA)
-        pygame.draw.circle(rs, (*state_col,155), (ring_r+2,ring_r+2), ring_r, 2)
-        s.blit(rs, (cx-ring_r-2, cy-ring_r-2))
+        # Inner neon ring
+        ring_r = FACE_W // 2 + 3
+        for gw in range(22, 0, -5):
+            a4b = max(0, int(pulse * (22 - gw) * 1.4))
+            rs2 = pygame.Surface((ring_r*2+gw*2, ring_r*2+gw*2), pygame.SRCALPHA)
+            pygame.draw.circle(rs2, (*sc, a4b), (ring_r+gw, ring_r+gw), ring_r+gw, 2)
+            s.blit(rs2, (cx-ring_r-gw, cy-ring_r-gw))
+        rs_hard = pygame.Surface(((ring_r+2)*2, (ring_r+2)*2), pygame.SRCALPHA)
+        pygame.draw.circle(rs_hard, (*sc, 200), (ring_r+2, ring_r+2), ring_r, 2)
+        s.blit(rs_hard, (cx-ring_r-2, cy-ring_r-2))
 
-        # Face PNG — cross-fade
-        cur  = self.faces.get(self.state)  or self.faces.get('idle')
+        # Face PNG cross-fade
+        cur  = self.faces.get(self.state) or self.faces.get('idle')
         prev = self.faces.get(self.prev_state) or self.faces.get('idle')
         if cur is None:
             return
         if self.blend_t < 1.0 and prev is not None and prev is not cur:
-            t  = smooth(self.blend_t)
-            ps = prev.copy(); ps.set_alpha(int(255*(1.0-t))); s.blit(ps,(fx,fy))
-            cs = cur.copy();  cs.set_alpha(int(255*t));       s.blit(cs,(fx,fy))
+            t2 = smooth(self.blend_t)
+            ps = prev.copy(); ps.set_alpha(int(255*(1.0-t2))); s.blit(ps,(fx,fy))
+            cs = cur.copy();  cs.set_alpha(int(255*t2));       s.blit(cs,(fx,fy))
         else:
             s.blit(cur, (fx, fy))
 
-        # MIC indicator lart djathtas të fytyrës
+        # MIC indicator — top-right of face
+        mic_x = fx + FACE_W - 30
+        mic_y = fy + 30
         mc = MIC_ON if self.mic_active else MIC_OFF
-        pygame.draw.circle(s, mc, (fx+FACE_W-26, fy+26), 12)
-        lt = self.fn_xs.render('MIC', True, (200,220,200) if self.mic_active else (70,70,70))
-        s.blit(lt, (fx+FACE_W-26-lt.get_width()//2, fy+44))
+        if self.mic_active:
+            mp2 = 0.5 + 0.5*math.sin(self.t * 7)
+            mgs = pygame.Surface((38,38), pygame.SRCALPHA)
+            pygame.draw.circle(mgs, (*MIC_ON, int(60*mp2)), (19,19), 18)
+            s.blit(mgs, (mic_x-6, mic_y-6))
+        pygame.draw.circle(s, mc, (mic_x, mic_y), 10)
+        pygame.draw.circle(s, (0,0,0), (mic_x, mic_y), 10, 2)
+        lt = self.fn_xs.render('MIC', True, (210,235,215) if self.mic_active else (60,75,65))
+        s.blit(lt, (mic_x - lt.get_width()//2, mic_y + 14))
 
-        # State badge poshtë fytyrës
-        bt  = self.fn_s.render(self.state.upper(), True, (230,245,220))
-        bw  = bt.get_width() + 24
-        bh2 = bt.get_height() + 10
-        bx3 = fx + FACE_W//2 - bw//2
-        by3 = fy + FACE_H + 6
+        # State badge below face
+        bt  = self.fn_s.render(self.state.upper(), True, COL_TITLE)
+        bw  = bt.get_width() + 32
+        bh2 = bt.get_height() + 14
+        bx3 = cx - bw//2
+        by3 = fy + FACE_H + 10
         badge = pygame.Surface((bw, bh2), pygame.SRCALPHA)
-        pygame.draw.rect(badge, (*state_col, 40),  (0,0,bw,bh2), border_radius=10)
-        pygame.draw.rect(badge, (*state_col, 120), (0,0,bw,bh2), width=1, border_radius=10)
+        pygame.draw.rect(badge, (*BG_DEEP, 210), (0,0,bw,bh2), border_radius=12)
+        pygame.draw.rect(badge, (*sc, 160), (0,0,bw,bh2), width=1, border_radius=12)
+        gbadge = pygame.Surface((bw+10, bh2+10), pygame.SRCALPHA)
+        pygame.draw.rect(gbadge, (*sc, 25), (0,0,bw+10,bh2+10), border_radius=14)
+        s.blit(gbadge, (bx3-5, by3-5))
         s.blit(badge, (bx3, by3))
-        s.blit(bt, (bx3+12, by3+5))
+        s.blit(bt, (bx3 + 16, by3 + 7))
 
-    # ── Subtitle ──────────────────────────────────────────────────────────
+    # ── Subtitle bar — glassmorphism ──────────────────────────────────────
     def _draw_subtitle(self, s):
-        sy     = FACE_AREA
+        sy = TOP_H + FACE_AREA
+        sc = self._state_color()
+
+        # Glass panel
         sub_bg = pygame.Surface((W, SUB_H), pygame.SRCALPHA)
-        pygame.draw.rect(sub_bg, (4,10,2, 200), (0,0,W,SUB_H))
-        pygame.draw.line(sub_bg, (45,95,25,150), (0,0),(W,0), 1)
+        pygame.draw.rect(sub_bg, (*BG_DEEP, 220), (0,0,W,SUB_H))
+        pygame.draw.line(sub_bg, (*sc, 60),  (0,0),(W,0), 1)
+        pygame.draw.line(sub_bg, (*sc, 20),  (0,1),(W,1), 1)
+        pygame.draw.line(sub_bg, (*sc, 25),  (0,SUB_H-1),(W,SUB_H-1), 1)
         s.blit(sub_bg, (0, sy))
 
         if self.subtitle and self.sub_alpha > 2:
@@ -530,154 +762,191 @@ class FarmerFace:
             line  = ''; lines = []
             for w in words:
                 test = line + (' ' if line else '') + w
-                if self.fn_sub.size(test)[0] < W-50:
+                if self.fn_sub.size(test)[0] < W - 80:
                     line = test
                 else:
                     lines.append(line); line = w
             if line:
                 lines.append(line)
-            total_h = len(lines) * 22
+            lh      = self.fn_sub.get_height() + 2
+            total_h = len(lines) * lh
             start_y = sy + (SUB_H - total_h) // 2
             for i, ln in enumerate(lines):
                 surf = self.fn_sub.render(ln, True, SUB_TEXT)
                 surf.set_alpha(int(self.sub_alpha))
-                s.blit(surf, (W//2 - surf.get_width()//2, start_y+i*22))
+                s.blit(surf, (W//2 - surf.get_width()//2, start_y + i*lh))
 
         if self.mic_active:
-            pulse = 0.5 + 0.5*math.sin(self.t*6)
-            a2    = int(pulse*200)
-            dot_s = pygame.Surface((22,22), pygame.SRCALPHA)
-            pygame.draw.circle(dot_s, (*MIC_ON, a2), (11,11), 11)
-            s.blit(dot_s, (14, sy+SUB_H//2-11))
-            lt = self.fn_s.render('DUKE DËGJUAR...', True, MIC_ON)
-            lt.set_alpha(int(pulse*230))
-            s.blit(lt, (42, sy+SUB_H//2-lt.get_height()//2))
+            pulse = 0.5 + 0.5 * math.sin(self.t * 6)
+            a2    = int(pulse * 220)
+            ds = pygame.Surface((24,24), pygame.SRCALPHA)
+            pygame.draw.circle(ds, (*MIC_ON, a2), (12,12), 12)
+            s.blit(ds, (18, sy + SUB_H//2 - 12))
+            lt = self.fn_s.render('LISTENING...', True, MIC_ON)
+            lt.set_alpha(int(pulse * 240))
+            s.blit(lt, (50, sy + SUB_H//2 - lt.get_height()//2))
 
-    # ── HUD — 6 kolona të sistemuara ──────────────────────────────────────
+    # ── HUD — premium glassmorphism panels ───────────────────────────────
     def _draw_hud(self, s):
         hy = H - HUD_H
         d  = self.sensors
+        sc = self._state_color()
 
-        # Sfond HUD
+        # Glass background
         hb = pygame.Surface((W, HUD_H), pygame.SRCALPHA)
-        pygame.draw.rect(hb, (3,6,12, 250), (0,0,W,HUD_H))
-        pygame.draw.line(hb, (*ACCENT, 75), (0,0),(W,0), 2)
-        pygame.draw.line(hb, (*ACCENT, 22), (0,2),(W,2), 1)
+        pygame.draw.rect(hb, (*BG_DEEP, 240), (0, 0, W, HUD_H))
+        pygame.draw.line(hb, (*sc, 100), (0,0),(W,0), 2)
+        pygame.draw.line(hb, (*sc, 30),  (0,2),(W,2), 1)
         s.blit(hb, (0, hy))
 
-        # Vlerat nga sensorët
-        mp   = float(d.get('moisture_pct',    50))
-        ms   = str(d.get('moisture_status',   'OPTIMAL'))
-        st   = float(d.get('soil_temp',        20))
-        at   = float(d.get('air_temp',         22))
-        hu   = float(d.get('humidity',         60))
-        pump = d.get('pump_active', False)
+        # Sensor values
+        mp  = float(d.get('moisture_pct',   50))
+        ms  = str(d.get('moisture_status',  'OPTIMAL'))
+        hu  = float(d.get('humidity',        60))
+        mc  = {'WET':COL_WARN,'OPTIMAL':COL_GOOD,
+               'DRY':COL_WARN,'CRITICAL':COL_BAD}.get(ms, COL_TEXT)
 
-        mc  = {'WET':COL_WARN,'OPTIMAL':COL_GOOD,'DRY':COL_WARN,'CRITICAL':COL_BAD}.get(ms, COL_TEXT)
-        stc = COL_BAD  if st < 10 or st > 35 else \
-              COL_WARN if st < 15 or st > 30 else COL_GOOD
-        atc = COL_BAD  if at <  5 or at > 40 else \
-              COL_WARN if at < 10 or at > 35 else COL_TEXT
-        pc  = COL_GOOD if pump else (COL_BAD if ms=='CRITICAL' else COL_DIM)
-
-        # Voice state
         vs_now = getattr(self, 'voice_state', 'idle')
         vc     = ACCENT2 if vs_now == 'listening' else \
                  ACCENT  if vs_now == 'speaking'  else COL_DIM
-        vl     = 'DËGJOJ' if vs_now == 'listening' else \
-                 'FLAS'   if vs_now == 'speaking'  else 'STANDBY'
+        vl     = 'LISTENING' if vs_now == 'listening' else \
+                 'SPEAKING'  if vs_now == 'speaking'  else 'STANDBY'
 
         panels = [
-            ('LAGËSHTIA TOK.', f'{mp:.0f}%',                ms,         mc,       mp/100),
-            ('TEMP. TOKËS',    f'{st:.1f}°C',               'DS18B20',  stc,      None),
-            ('TEMP. AJRIT',    f'{at:.1f}°C',               'DHT22',    atc,      None),
-            ('LAGËSHTIA REL.', f'{hu:.0f}%',                'HUMIDITY', COL_TEXT, hu/100),
-            ('POMPA',  'AKTIVE' if pump else 'FIKUR',       'UJITJA',   pc,       None),
-            ('ZËRI',           vl,                          'VOICE AI', vc,       None),
+            ('SOIL MOISTURE', f'{mp:.0f}%',  ms,              mc,       mp/100),
+            ('HUMIDITY',      f'{hu:.0f}%',  'REL. HUM',      COL_TEXT, hu/100),
+            ('VOICE AI',      vl,            vs_now.upper(),  vc,       None),
         ]
 
-        PW = W // len(panels)
+        PAD = 14
+        PW  = W // len(panels)
+        BR  = 12
 
         for i, (hdr, val, sub, col, bar) in enumerate(panels):
-            px = i * PW
+            px  = i * PW
+            cpx = px + PAD
+            cpw = PW - PAD*2
 
-            # Ndarëse vertikale
-            if i > 0:
-                pygame.draw.line(s, (*ACCENT, 22), (px, hy+6),(px, hy+HUD_H-6), 1)
+            # Card glass background
+            card = pygame.Surface((cpw, HUD_H - PAD), pygame.SRCALPHA)
+            pygame.draw.rect(card, (*GLASS_BG, 200), (0,0,cpw,HUD_H-PAD), border_radius=BR)
+            pygame.draw.rect(card, (*col, 18),        (0,0,cpw,HUD_H-PAD), border_radius=BR)
+            hi = pygame.Surface((cpw-2, 14), pygame.SRCALPHA)
+            pygame.draw.rect(hi, (255,255,255,14), (0,0,cpw-2,14), border_radius=BR)
+            card.blit(hi, (1, 1))
+            pygame.draw.rect(card, (*col, 90),  (0,0,cpw,HUD_H-PAD),   width=1, border_radius=BR)
+            pygame.draw.rect(card, (*col, 28),  (-1,-1,cpw+2,HUD_H-PAD+2), width=2, border_radius=BR+1)
+            s.blit(card, (cpx, hy + PAD//2))
 
-            # Card tint
-            card = pygame.Surface((PW-2, HUD_H-6), pygame.SRCALPHA)
-            pygame.draw.rect(card, (*col, 13), (0,0,PW-2,HUD_H-6), border_radius=8)
-            pygame.draw.rect(card, (*col, 40), (0,0,PW-2,HUD_H-6), width=1, border_radius=8)
-            s.blit(card, (px+1, hy+3))
+            mid_x = cpx + cpw // 2
 
-            # Header
+            # Header label
             ht = self.fn_xs.render(hdr, True, COL_DIM)
-            s.blit(ht, (px+PW//2-ht.get_width()//2, hy+8))
+            s.blit(ht, (mid_x - ht.get_width()//2, hy + PAD + 4))
 
-            # Vlera kryesore — pulsim kur aktive
+            # Main value (pulse for voice)
             va = 255
-            if i == 4 and pump:
-                va = int(180+75*(0.5+0.5*math.sin(self.t*3.5)))
-            if i == 5 and vs_now == 'listening':
-                va = int(160+95*(0.5+0.5*math.sin(self.t*6)))
+            if i == 2:
+                if vs_now == 'listening':
+                    va = int(160 + 95*(0.5+0.5*math.sin(self.t*6)))
+                elif vs_now == 'speaking':
+                    va = int(185 + 70*(0.5+0.5*math.sin(self.t*4)))
 
-            fn_use = self.fn_m if i == 5 else self.fn_xl
-            vs_t   = fn_use.render(val, True, col)
-            vs_t.set_alpha(va)
-            s.blit(vs_t, (px+PW//2-vs_t.get_width()//2, hy+28))
+            fn_val = self.fn_xl if i < 2 else self.fn_l
+            vt = fn_val.render(val, True, col)
+            vt.set_alpha(va)
+            s.blit(vt, (mid_x - vt.get_width()//2, hy + PAD + 22))
 
             # Sub label
             ss2 = self.fn_xs.render(sub, True, COL_DIM)
-            s.blit(ss2, (px+PW//2-ss2.get_width()//2, hy+HUD_H-17))
+            s.blit(ss2, (mid_x - ss2.get_width()//2, hy + HUD_H - 22))
 
-            # Progress bar (vetëm kur ka vlerë)
+            # Progress bar with gradient + animated sweep
             if bar is not None:
-                bx2 = px+10; bw2 = PW-20; bh2 = 5
-                by2 = hy + HUD_H - 10
-                pygame.draw.rect(s, (12,20,14), (bx2,by2,bw2,bh2), border_radius=3)
-                fill = max(4, int(bw2*bar))
-                pygame.draw.rect(s, col, (bx2,by2,fill,bh2), border_radius=3)
-                gt = pygame.Surface((10,10), pygame.SRCALPHA)
-                pygame.draw.circle(gt, (*col,130), (5,5), 4)
-                s.blit(gt, (bx2+fill-5, by2-2))
+                bx2 = cpx + 8; bw2 = cpw - 16; bh2 = 6
+                by2 = hy + HUD_H - 14
+                # Track: dark base + very dim color tint
+                pygame.draw.rect(s, (12,20,14), (bx2, by2, bw2, bh2), border_radius=3)
+                dim = (col[0]//4, col[1]//4, col[2]//4)
+                pygame.draw.rect(s, dim, (bx2, by2, bw2, bh2), border_radius=3)
+                # Color fill
+                fill = max(6, int(bw2 * bar))
+                pygame.draw.rect(s, col, (bx2, by2, fill, bh2), border_radius=3)
+                # Top highlight stripe
+                hl = pygame.Surface((fill, 2), pygame.SRCALPHA)
+                pygame.draw.rect(hl, (255,255,255,55), (0,0,fill,2), border_radius=1)
+                s.blit(hl, (bx2, by2))
+                # Animated sweep glint
+                sw_x = int((self.t * 55 + i * 80) % (fill + 38)) - 19
+                if 0 < sw_x < fill:
+                    sw = pygame.Surface((38, bh2), pygame.SRCALPHA)
+                    pygame.draw.ellipse(sw, (255,255,255,50), (0,0,38,bh2))
+                    s.blit(sw, (bx2 + sw_x - 19, by2))
+                # Outer bar glow
+                gl = pygame.Surface((fill+4, bh2+6), pygame.SRCALPHA)
+                pygame.draw.rect(gl, (*col, 30), (0,0,fill+4,bh2+6), border_radius=4)
+                s.blit(gl, (bx2-2, by2-3))
+                # End cap glow dot
+                gt = pygame.Surface((16,16), pygame.SRCALPHA)
+                pygame.draw.circle(gt, (*col, 220), (8,8), 7)
+                pygame.draw.circle(gt, (255,255,255,90), (8,8), 4)
+                pygame.draw.circle(gt, (255,255,255,190), (8,8), 2)
+                s.blit(gt, (bx2+fill-8, by2-5))
 
-    # ── Overlay (top bar) ─────────────────────────────────────────────────
+            # Right divider
+            if i < len(panels)-1:
+                pygame.draw.line(s, (*sc, 18),
+                                 (px+PW, hy+PAD+2), (px+PW, hy+HUD_H-PAD-2), 1)
+
+    # ── Top overlay bar — premium ─────────────────────────────────────────
     def _draw_overlay(self, s):
         el      = int(time.time() - self.start_time)
         mm, ss2 = el//60, el%60
+        sc      = self._state_color()
 
-        # Top bar
-        tb = pygame.Surface((W, 36), pygame.SRCALPHA)
-        pygame.draw.rect(tb, (3,6,12, 215), (0,0,W,36))
-        pygame.draw.line(tb, (*ACCENT, 50), (0,35),(W,35), 1)
+        # Glass top bar
+        tb = pygame.Surface((W, TOP_H), pygame.SRCALPHA)
+        pygame.draw.rect(tb, (*BG_DEEP, 230), (0,0,W,TOP_H))
+        pygame.draw.line(tb, (*sc, 65),  (0,TOP_H-1),(W,TOP_H-1), 2)
+        pygame.draw.line(tb, (*sc, 20),  (0,TOP_H-3),(W,TOP_H-3), 1)
         s.blit(tb, (0,0))
 
-        # Animated underline
-        tlen   = 210; tx0 = W//2 - tlen//2
-        anim_x = int((self.t*80) % (tlen+60)) - 30
-        pygame.draw.line(s, (*ACCENT,40), (tx0,35),(tx0+tlen,35), 1)
-        ul = pygame.Surface((42,2), pygame.SRCALPHA)
-        pygame.draw.rect(ul, (*ACCENT, 200), (0,0,42,2))
-        s.blit(ul, (tx0+anim_x, 35))
+        # Animated shimmer under title
+        tlen  = 260; tx0 = W//2 - tlen//2
+        shimx = int((self.t * 90) % (tlen + 70)) - 35
+        pygame.draw.line(s, (*sc, 30), (tx0, TOP_H-1), (tx0+tlen, TOP_H-1), 1)
+        shim = pygame.Surface((55, 2), pygame.SRCALPHA)
+        pygame.draw.rect(shim, (*sc, 210), (0,0,55,2))
+        s.blit(shim, (tx0 + shimx, TOP_H-1))
 
-        # Titulli qendër
-        title = self.fn_m.render('TERRA  GUIDE', True, ACCENT)
-        s.blit(title, (W//2-title.get_width()//2, 9))
+        # Title — centered with decorative markers
+        title = self.fn_title.render('TERRA  GUIDE', True, COL_TITLE)
+        tglow = self.fn_title.render('TERRA  GUIDE', True, sc)
+        tglow.set_alpha(45)
+        ty = TOP_H//2 - title.get_height()//2
+        s.blit(tglow, (W//2 - title.get_width()//2 + 1, ty + 1))
+        s.blit(title, (W//2 - title.get_width()//2, ty))
+        # Decorative diamond markers flanking title
+        mkr = self.fn_s.render('◆', True, sc)
+        mkr.set_alpha(185)
+        gap = 10
+        s.blit(mkr, (W//2 - title.get_width()//2 - mkr.get_width() - gap,
+                     TOP_H//2 - mkr.get_height()//2))
+        s.blit(mkr, (W//2 + title.get_width()//2 + gap,
+                     TOP_H//2 - mkr.get_height()//2))
 
-        # Djathtas: FPS + uptime
-        info = self.fn_xs.render(f'FPS {self.fps_display:.0f}   UP {mm:02d}:{ss2:02d}', True, COL_DIM)
-        s.blit(info, (W-info.get_width()-10, 12))
+        # Right: FPS · uptime
+        info = self.fn_xs.render(f'{self.fps_display:.0f} FPS   {mm:02d}:{ss2:02d}', True, COL_DIM)
+        s.blit(info, (W - info.get_width() - 16, TOP_H//2 - info.get_height()//2))
 
-        # Majtas: state dot pulsues
-        sc2    = {'talking':ACCENT,'listening':ACCENT2,'thinking':(170,90,220),
-                  'angry':COL_BAD,'happy':COL_GOOD}.get(self.state, COL_DIM)
-        pulse4 = 0.5+0.5*math.sin(self.t*3.5)
-        dot    = pygame.Surface((12,12), pygame.SRCALPHA)
-        pygame.draw.circle(dot, (*sc2, int(160+95*pulse4)), (6,6), 5)
-        s.blit(dot, (10,12))
-        st_lbl = self.fn_xs.render(self.state.upper(), True, sc2)
-        s.blit(st_lbl, (26, 13))
+        # Left: status dot + label
+        pulse4 = 0.5 + 0.5*math.sin(self.t * 3.5)
+        dot    = pygame.Surface((14,14), pygame.SRCALPHA)
+        pygame.draw.circle(dot, (*sc, int(170+85*pulse4)), (7,7), 6)
+        pygame.draw.circle(dot, (*sc, 250), (7,7), 3)
+        s.blit(dot, (14, TOP_H//2 - 7))
+        st_lbl = self.fn_xs.render(self.state.upper(), True, sc)
+        s.blit(st_lbl, (32, TOP_H//2 - st_lbl.get_height()//2))
 
 
 # ─── run_face — entry point ────────────────────────────────────────────────
@@ -706,16 +975,16 @@ def run_face(cmd_queue=None, sensor_data=None):
         pygame.K_9: 'listening', pygame.K_0: 'laughing',
     }
 
-    # Demo automatik
+    # Demo sequence (auto-cycle when no external queue)
     DEMO = [
-        ('idle',      '',                                          4.5),
-        ('happy',     'Mirëmëngjes! Ferma juaj është në rregull!', 3.5),
-        ('talking',   'Lagështia e tokës: 54%. Optimale.',         4.0),
-        ('thinking',  'Duke analizuar kushtet e fushës...',        3.0),
-        ('listening', '',                                          3.0),
-        ('sad',       'Lagështia po bie. Konsideroni ujitjen.',    3.5),
-        ('surprised', 'Pengesë e zbuluar në 15 cm!',              2.5),
-        ('laughing',  'Sezon i shkëlqyer korrjeje!',              3.5),
+        ('idle',      '',                                              4.5),
+        ('happy',     'Good morning! Your farm is doing well.',        3.5),
+        ('talking',   'Soil moisture at 54%. Optimal conditions.',     4.0),
+        ('thinking',  'Analyzing field conditions...',                 3.0),
+        ('listening', '',                                              3.0),
+        ('sad',       'Moisture dropping. Consider irrigation.',       3.5),
+        ('surprised', 'Obstacle detected at 15 cm!',                  2.5),
+        ('laughing',  'Excellent harvest season ahead!',              3.5),
     ]
     demo_i = 0; demo_t = 0.0
 

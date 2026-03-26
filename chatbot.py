@@ -22,8 +22,8 @@ import json
 import pygame
 import speech_recognition as sr
 from openai import OpenAI
-from gtts import gTTS
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 
@@ -33,6 +33,9 @@ LISTEN_TIMEOUT = 7         # seconds to wait for speech start
 LISTEN_PHRASE  = 10        # max seconds of speech
 SILENCE_LOOPS  = 3         # idle loops before auto-greeting
 ENERGY_THRESH  = 350       # microphone sensitivity (lower = more sensitive)
+
+# edge-tts voice — 100% human-sounding Microsoft Neural TTS
+EDGE_VOICE = 'en-US-GuyNeural'   # natural male; swap to 'en-US-JennyNeural' for female
 
 
 # ─── System prompt builder ─────────────────────────────────────────────────
@@ -78,24 +81,40 @@ def pick_emotion(text: str, sensors: dict) -> str:
     return 'talking'
 
 
-# ─── TTS (gTTS for English) ───────────────────────────────────────────────────
+# ─── TTS ─── edge-tts (Microsoft Neural) → pyttsx3 fallback ────────────────
 def speak_gtts(text: str):
-    """Speak text using gTTS in English. Blocks until done."""
+    """Speak text using edge-tts (human voice). Blocks until done."""
     try:
-        tts = gTTS(text=text, lang='en', slow=False)
+        import edge_tts
         fd, path = tempfile.mkstemp(suffix='.mp3')
         os.close(fd)
-        tts.save(path)
 
-        # Përdor mpg123 direkt — më i besueshëm në Raspberry Pi
-        os.system(f'mpg123 -a hw:0,0 -q "{path}"')
+        async def _save():
+            comm = edge_tts.Communicate(text, EDGE_VOICE)
+            await comm.save(path)
+
+        asyncio.run(_save())
+
+        # Play with pygame mixer (cross-platform: Pi + Windows)
+        try:
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+            pygame.mixer.music.load(path)
+            pygame.mixer.music.set_volume(1.0)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.04)
+        finally:
+            try:
+                pygame.mixer.music.unload()
+            except Exception:
+                pass
 
     except Exception as e:
-        print(f"[TTS] gTTS error: {e}")
+        print(f"[TTS] edge-tts error: {e} — falling back to pyttsx3")
         _speak_pyttsx3(text)
     finally:
         try: os.unlink(path)
-        except: pass
+        except Exception: pass
 
 
 def _speak_pyttsx3(text: str):
@@ -196,8 +215,8 @@ class ChatBot:
                     timeout=LISTEN_TIMEOUT,
                     phrase_time_limit=LISTEN_PHRASE
                 )
-            text = self.recognizer.recognize_google(audio, language='sq')
-            print(f"[STT] Dëgjova: {text}")
+            text = self.recognizer.recognize_google(audio, language='en-US')
+            print(f"[STT] Heard: {text}")
             return text
         except sr.WaitTimeoutError:
             return None

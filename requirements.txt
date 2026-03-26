@@ -7,7 +7,10 @@ pygame>=2.5.0
 # Image processing
 Pillow>=10.0.0
 
-# TTS — online (clear English, recommended)
+# TTS — Microsoft Neural (100% human English voice, no API key needed)
+edge-tts>=6.1.9
+
+# TTS — Google fallback (online, clear English)
 gTTS>=2.5.0
 
 # TTS — offline fallback

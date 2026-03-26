@@ -23,12 +23,7 @@ import random
 cmd_queue   = queue.Queue()
 sensor_data = {}          # dict i ndarë mes të gjitha thread-eve
 
-# ── Dashboard (opsional) ──────────────────────────────────────────────────
-try:
-    import dashboard as _dash
-    _DASH_OK = True
-except Exception:
-    _DASH_OK = False
+
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -74,12 +69,6 @@ def arduino_thread(arduino):
 
         sensor_data.update(data)
 
-        if _DASH_OK:
-            try:
-                _dash._live_sensors.update(data)
-            except Exception:
-                pass
-
 
 # ═════════════════════════════════════════════════════════════════════════
 # THREAD 2 — Emocione: reagon ndaj lëvizjes dhe pengesave
@@ -109,29 +98,29 @@ def emotion_thread():
         dist      = sensor_data.get('distance', 999)
         pct       = sensor_data.get('moisture_pct', 50)
 
-        # Pengesë afër — prioritet i lartë
+        # Obstacle nearby — high priority
         if obstacle == 'NEAR' or dist < 15:
-            emit('angry', f'Pengesë! {dist:.0f}cm')
+            emit('angry', f'Obstacle! {dist:.0f}cm')
         elif obstacle == 'CLOSE' or dist < 30:
-            emit('confused', f'Objekt afër {dist:.0f}cm')
+            emit('confused', f'Object close {dist:.0f}cm')
 
-        # Lëvizja normale
+        # Normal movement
         elif direction == 'FORWARD':
-            emit('happy', 'Duke ndjekur vijën...')
+            emit('happy', 'Following the line...')
         elif direction in ('LEFT', 'RIGHT'):
-            emit('thinking', f'Kthim {direction.lower()}')
+            emit('thinking', f'Turning {direction.lower()}')
         elif direction == 'STOP':
-            emit('idle', 'Ndaluar')
+            emit('idle', 'Stopped')
 
-        # Gjendja e tokës (prioritet i ulët)
+        # Soil status (low priority)
         elif moisture == 'DRY':
-            emit('sad', f'Toka e thatë {pct:.0f}%')
+            emit('sad', f'Soil dry {pct:.0f}%')
         elif moisture == 'WET':
-            emit('confused', f'Toka shumë e lagët {pct:.0f}%')
+            emit('confused', f'Soil too wet {pct:.0f}%')
         elif moisture == 'CRITICAL':
-            emit('angry', f'Krizë lagështie {pct:.0f}%')
+            emit('angry', f'Moisture critical {pct:.0f}%')
         else:
-            emit('happy', f'Gjithçka OK — lagështia {pct:.0f}%')
+            emit('happy', f'All good — moisture {pct:.0f}%')
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -192,18 +181,13 @@ if __name__ == '__main__':
     for t in threads:
         t.start()
 
-    if _DASH_OK:
-        td = threading.Thread(target=_dash.run_dashboard, daemon=True, name='Dashboard')
-        td.start()
-        print('[Main] Dashboard: http://localhost:5000')
-
-    print("[Main] Të gjitha threads aktive\n")
+    print("[Main] All threads active\n")
 
     # ── 4. Fytyra Fullscreen në Pi ────────────────────────────
     # import lazy këtu — pas DISPLAY=:0 setup
     try:
         from face_engine import run_face
-        cmd_queue.put({'state': 'happy', 'text': 'ARES-X Duke ndjekur vijën!', 'mic': False})
+        cmd_queue.put({'state': 'happy', 'text': 'ARES-X — Following the line!', 'mic': False})
         run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)   # bllokues — loop kryesor
 
     except Exception as e:

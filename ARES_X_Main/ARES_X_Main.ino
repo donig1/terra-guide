@@ -1,53 +1,50 @@
 /*
- * ARES-X V4 — Arduino Mega 2560 — Kod i Unifikuar
- * =====================================================================
- * Kontrollon: motorët DC (L298N), sensorët IR, HC-SR04, servo
- * Dërgon tek Pi (JSON): {"dist":34,"ir_l":0,"ir_r":0,"dir":"FORWARD","servo":90,"mode":"AUTO"}
- * Merr komanda nga Pi:  CMD:STOP  CMD:AUTO  CMD:MANUAL  SERVO:90
+ * ============================================================
+ *  TERRA GUIDE — Arduino UNO
+ *  Line Following + Obstacle Avoidance
+ *  Komunikim Serial JSON me Raspberry Pi 4
+ * ============================================================
+ *  LIDHJET:
+ *   L298N → ENA=5  IN1=7  IN2=8  ENB=6  IN3=9  IN4=10
+ *   IR    → LEFT=3 (INPUT_PULLUP)  RIGHT=2 (INPUT_PULLUP)
+ *   SR04  → TRIG=12  ECHO=11
+ *   USB   → /dev/ttyACM0 @ 9600 baud
  *
- * LIDHJET:
- *   L298N  ENA=5  IN1=7  IN2=8  ENB=6  IN3=9  IN4=10
- *   IR     IR_LEFT=3(INPUT_PULLUP)  IR_RIGHT=2(INPUT_PULLUP)
- *   HC-SR04 TRIG=12  ECHO=11
- *   SERVO  PIN=13
- *   SERIAL 9600 baud  /dev/ttyACM0
- * =====================================================================
+ *  IR LOGJIKA: 1=mbi vijë zezë  0=jashtë vijës
+ *
+ *  DËRGON tek Pi çdo 300ms:
+ *  {"dist":34,"ir_l":1,"ir_r":1,"dir":"FORWARD","mode":"AUTO"}
+ *
+ *  MERR nga Pi:
+ *  CMD:STOP | CMD:FORWARD | CMD:BACKWARD
+ *  CMD:LEFT | CMD:RIGHT | CMD:AUTO | CMD:MANUAL
+ * ============================================================
  */
 
-#include <Servo.h>
-
-// ── Motor L298N ─────────────────────────────────────────────────
+// ===== MOTOR L298N =====
 const int ENA = 5,  IN1 = 7,  IN2 = 8;
 const int ENB = 6,  IN3 = 9,  IN4 = 10;
-const int MOTOR_SPEED = 150;   // 0-255 (150 ≈ 59%)
+const int SPEED_NORMAL = 150;
+const int SPEED_TURN   = 130;
 
-// ── Sensorët IR (INPUT_PULLUP: 0=vija, 1=jashtë vijës) ──────────
+// ===== IR SENSORËT =====
 const int IR_LEFT  = 3;
 const int IR_RIGHT = 2;
 
-// ── HC-SR04 ──────────────────────────────────────────────────────
+// ===== HC-SR04 =====
 const int TRIG = 12;
 const int ECHO = 11;
-const float OBSTACLE_CM = 30.0;
+const int OBSTACLE_CM = 20;
 
-// ── Servo ────────────────────────────────────────────────────────
-const int SERVO_PIN = 13;
-Servo scanServo;
-int servoAngle = 90;
+// ===== VARIABLA =====
+bool manualMode    = false;
+String currentDir  = "STOP";
+String lastTurn    = "RIGHT";
+String piCommand   = "";
+unsigned long lastSend = 0;
 
-// ── Modaliteti ───────────────────────────────────────────────────
-bool autoMode = true;
-String currentDir = "STOP";
-
-// ── Timing ───────────────────────────────────────────────────────
-unsigned long lastSend       = 0;
-const unsigned long SEND_MS  = 200;   // dërgo JSON çdo 200ms
-
-// ═════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 void setup() {
-  Serial.begin(9600);
-  delay(1000);
-
   // Motorë
   pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
   pinMode(ENB, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
@@ -61,155 +58,174 @@ void setup() {
   pinMode(ECHO, INPUT);
   digitalWrite(TRIG, LOW);
 
-  // Servo
-  scanServo.attach(SERVO_PIN);
-  scanServo.write(90);
+  stopRobot();
 
-  stopMotors();
-
-  Serial.println("{\"status\":\"READY\",\"msg\":\"ARES-X Boot OK\"}");
+  Serial.begin(9600);
+  delay(500);
+  Serial.println("{\"status\":\"READY\",\"device\":\"TERRA_GUIDE\"}");
 }
 
-// ═════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 void loop() {
-  // Lexo komanda nga Pi
-  if (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    handleCommand(cmd);
-  }
+  // 1. Lexo komanda nga Pi
+  readPiCommands();
 
-  // Logjika AUTO
-  if (autoMode) {
-    float dist = readDistance();
+  // 2. Lexo sensorët
+  long dist  = readDistance();
+  int  irL   = digitalRead(IR_LEFT);
+  int  irR   = digitalRead(IR_RIGHT);
+
+  // 3. AUTO mode — lëvizja autonome
+  if (!manualMode) {
     if (dist > 0 && dist < OBSTACLE_CM) {
-      stopMotors();
-      checkAndTurn(dist);
+      avoidObstacle();
     } else {
-      followLine();
+      followLine(irL, irR);
     }
   }
 
-  // Dërgo JSON çdo SEND_MS
-  if (millis() - lastSend >= SEND_MS) {
+  // 4. Dërgo JSON çdo 300ms
+  if (millis() - lastSend >= 300) {
     lastSend = millis();
-    sendJSON();
+    sendJSON(dist, irL, irR);
   }
 }
 
-// ── Menaxho komandat nga Pi ──────────────────────────────────────
-void handleCommand(String cmd) {
-  if      (cmd == "CMD:STOP")    { autoMode = false; stopMotors(); currentDir = "STOP"; }
-  else if (cmd == "CMD:FORWARD") { autoMode = false; goForward();  currentDir = "FORWARD"; }
-  else if (cmd == "CMD:BACK")    { autoMode = false; goBack();     currentDir = "BACK"; }
-  else if (cmd == "CMD:LEFT")    { autoMode = false; goLeft();     currentDir = "LEFT"; }
-  else if (cmd == "CMD:RIGHT")   { autoMode = false; goRight();    currentDir = "RIGHT"; }
-  else if (cmd == "CMD:AUTO")    { autoMode = true;  currentDir = "AUTO"; }
-  else if (cmd == "CMD:MANUAL")  { autoMode = false; stopMotors(); currentDir = "STOP"; }
-  else if (cmd.startsWith("SERVO:")) {
-    int angle = cmd.substring(6).toInt();
-    angle = constrain(angle, 0, 180);
-    scanServo.write(angle);
-    servoAngle = angle;
+// ═════════════════════════════════════════════════════════════
+// NDIQ VIJËN — IR LOGJIKA: 1=zezë  0=bardhë
+// ═════════════════════════════════════════════════════════════
+void followLine(int irL, int irR) {
+  if (irL == 1 && irR == 1) {
+    forward();                      // të dy mbi vijë → EC PARA
+
+  } else if (irL == 0 && irR == 1) {
+    goRight();                      // majtas doli → KTHEHU DJATHTAS
+    lastTurn = "RIGHT";
+
+  } else if (irL == 1 && irR == 0) {
+    goLeft();                       // djathtas doli → KTHEHU MAJTAS
+    lastTurn = "LEFT";
+
+  } else {
+    // të dy jashtë → kërko vijën nga drejtimi i fundit
+    if (lastTurn == "LEFT") goLeft();
+    else                    goRight();
   }
 }
 
-// ── Ndiq vijën (IR) ──────────────────────────────────────────────
-void followLine() {
-  int left  = digitalRead(IR_LEFT);
-  int right = digitalRead(IR_RIGHT);
+// ═════════════════════════════════════════════════════════════
+// SHMANG PENGESËN
+// ═════════════════════════════════════════════════════════════
+void avoidObstacle() {
+  Serial.println("{\"event\":\"OBSTACLE\"}");
 
-  if      (left == 0 && right == 0) { goForward(); currentDir = "FORWARD"; }
-  else if (left == 1 && right == 0) { goRight();   currentDir = "RIGHT"; }
-  else if (left == 0 && right == 1) { goLeft();    currentDir = "LEFT"; }
-  else                               { stopMotors(); currentDir = "STOP"; }
-}
+  stopRobot();  delay(300);
 
-// ── Kontroll pengesa + kthim — vetëm rrota, pa servo ────────────
-void checkAndTurn(float obsDist) {
-  // 1. Ndalo
-  stopMotors();
-  currentDir = "STOP";
-  delay(200);
-
-  // 2. Prapa pak
-  goBack();
-  currentDir = "BACK";
-  delay(350);
-  stopMotors();
-  delay(150);
-
-  // 3. Kthehu djathtas (gjithmonë djathtas si parazgjedhje)
-  //    IR sensorët do të korrigjojnë drejtimin sapo rigjejnë vijën
-  goRight();
-  currentDir = "RIGHT";
+  // Prapa
+  goBackward();
   delay(400);
-  stopMotors();
-  currentDir = "STOP";
-  delay(150);
+  stopRobot();  delay(200);
+
+  // Kthehu djathtas derisa të gjejë vijën (max 800ms)
+  goRight();
+  unsigned long t = millis();
+  while (millis() - t < 800) {
+    if (digitalRead(IR_LEFT) == 1 || digitalRead(IR_RIGHT) == 1) break;
+  }
+
+  stopRobot();  delay(150);
 }
 
-// ── Lëvizjet e motorëve ──────────────────────────────────────────
-void goForward() {
-  analogWrite(ENA, MOTOR_SPEED); analogWrite(ENB, MOTOR_SPEED);
+// ═════════════════════════════════════════════════════════════
+// LËVIZJET
+// ═════════════════════════════════════════════════════════════
+void forward() {
+  analogWrite(ENA, SPEED_NORMAL); analogWrite(ENB, SPEED_NORMAL);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  currentDir = "FORWARD";
 }
 
-void goBack() {
-  analogWrite(ENA, MOTOR_SPEED); analogWrite(ENB, MOTOR_SPEED);
-  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+void goBackward() {
+  analogWrite(ENA, SPEED_NORMAL); analogWrite(ENB, SPEED_NORMAL);
+  digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH);
+  currentDir = "BACKWARD";
 }
 
 void goLeft() {
-  analogWrite(ENA, MOTOR_SPEED); analogWrite(ENB, MOTOR_SPEED);
-  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  analogWrite(ENA, SPEED_TURN); analogWrite(ENB, SPEED_TURN);
+  digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  currentDir = "LEFT";
 }
 
 void goRight() {
-  analogWrite(ENA, MOTOR_SPEED); analogWrite(ENB, MOTOR_SPEED);
+  analogWrite(ENA, SPEED_TURN); analogWrite(ENB, SPEED_TURN);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH);
+  currentDir = "RIGHT";
 }
 
-void stopMotors() {
+void stopRobot() {
   analogWrite(ENA, 0); analogWrite(ENB, 0);
   digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+  currentDir = "STOP";
 }
 
-// ── Lexo distancën HC-SR04 (cm) ──────────────────────────────────
-float readDistance() {
+// ═════════════════════════════════════════════════════════════
+// HC-SR04
+// ═════════════════════════════════════════════════════════════
+long readDistance() {
   digitalWrite(TRIG, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG, LOW);
 
-  long duration = pulseIn(ECHO, HIGH, 20000);  // max 20ms ≈ 340cm
-  if (duration == 0) return 999.0;
-  return duration * 0.034 / 2.0;
+  long dur = pulseIn(ECHO, HIGH, 20000);
+  if (dur == 0) return 999;
+  return dur * 0.034 / 2;
 }
 
-// ── Dërgo JSON tek Pi ─────────────────────────────────────────────
-void sendJSON() {
-  float dist = readDistance();
-  int irL    = digitalRead(IR_LEFT);
-  int irR    = digitalRead(IR_RIGHT);
+// ═════════════════════════════════════════════════════════════
+// LEX KOMANDA NGA PI
+// ═════════════════════════════════════════════════════════════
+void readPiCommands() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n') {
+      piCommand.trim();
 
+      if      (piCommand == "CMD:STOP")     { manualMode = true;  stopRobot();   }
+      else if (piCommand == "CMD:FORWARD")  { manualMode = true;  forward();     }
+      else if (piCommand == "CMD:BACKWARD") { manualMode = true;  goBackward();  }
+      else if (piCommand == "CMD:LEFT")     { manualMode = true;  goLeft();      }
+      else if (piCommand == "CMD:RIGHT")    { manualMode = true;  goRight();     }
+      else if (piCommand == "CMD:AUTO")     { manualMode = false;                }
+      else if (piCommand == "CMD:MANUAL")   { manualMode = true;  stopRobot();   }
+
+      piCommand = "";
+    } else {
+      piCommand += c;
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+// DËRGO JSON TEK PI
+// ═════════════════════════════════════════════════════════════
+void sendJSON(long dist, int irL, int irR) {
   Serial.print("{\"dist\":");
-  Serial.print(dist, 1);
+  Serial.print(dist);
   Serial.print(",\"ir_l\":");
   Serial.print(irL);
   Serial.print(",\"ir_r\":");
   Serial.print(irR);
   Serial.print(",\"dir\":\"");
   Serial.print(currentDir);
-  Serial.print("\",\"servo\":");
-  Serial.print(servoAngle);
-  Serial.print(",\"mode\":\"");
-  Serial.print(autoMode ? "AUTO" : "MANUAL");
+  Serial.print("\",\"mode\":\"");
+  Serial.print(manualMode ? "MANUAL" : "AUTO");
   Serial.println("\"}");
 }

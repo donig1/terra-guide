@@ -61,7 +61,7 @@ LOG_FILE       = "logs/ares_x.log"
 MAX_STOPS      = 5
 
 # ── Chatbot ────────────────────────────────
-CHATBOT_LANGUAGE = "sq"
+CHATBOT_LANGUAGE = "en-US"
 VOICE_RATE       = 150
 
 # ── Display / Fytyra ───────────────────────
