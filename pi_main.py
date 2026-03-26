@@ -1,15 +1,16 @@
 """
 Terra Guide — pi_main.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Ky file ekzekutohet NE RASPBERRY PI.
+NJE FILE — NIS GJITHE ROBOTIN:
 
-Nis:
-  1. arduino_thread   — lexon sensoret (cdo 0.5s)
-  2. chatbot_thread   — voice loop (mikrofon → GPT → komanda)
-  3. auto_emotion_thread — monitoron statusin e tokës
-  4. dashboard thread — Flask server ne port 5000
+  1. Arduino → CMD:AUTO   (robot nis ndjekjen e vijës)
+  2. arduino_thread        — lexon JSON nga Arduino çdo 200ms
+  3. emotion_thread        — reagon ndaj lëvizjes / pengesave
+  4. farming_thread        — servo Pi GPIO (plow, scan, dispense)
+  5. dashboard_thread      — Flask port 5000 (opsional)
+  6. Fytyra fullscreen     — pygame në ekranin e Pi-t (main thread)
 
-Fytyra NUK niset ketu — ajo del ne laptop (laptop_face.py).
+Ekzekutim: python3 pi_main.py
 """
 
 import threading
@@ -18,161 +19,210 @@ import time
 import math
 import random
 
+# ── Queue e komandave për fytyra ─────────────────────────────────────────
 cmd_queue   = queue.Queue()
-sensor_data = {}
+sensor_data = {}          # dict i ndarë mes të gjitha thread-eve
 
+# ── Dashboard (opsional) ──────────────────────────────────────────────────
 try:
     import dashboard as _dash
     _DASH_OK = True
 except Exception:
     _DASH_OK = False
 
-# face_engine importohet lazy (brenda main) — jo këtu, sepse pygame.init() dështon pa DISPLAY
 
+# ═════════════════════════════════════════════════════════════════════════
+# THREAD 1 — Arduino: lexo JSON, dërgo CMD:AUTO, update sensor_data
+# ═════════════════════════════════════════════════════════════════════════
+def arduino_thread(arduino):
+    """
+    Lexon JSON nga Arduino çdo 200ms dhe update-on sensor_data.
+    Arduino tashmë menaxhon vetë linjën (CMD:AUTO i dërguar nga main).
+    """
+    sim_t = 0.0
 
-# ── Arduino thread ────────────────────────────────────────────────────────
-def arduino_thread():
-    try:
-        from arduino_comm import ArduinoComm
-        arduino = ArduinoComm()
-        use_real = True
-        print("[Arduino] Lidhur me hardware-in real")
-    except Exception:
-        arduino  = None
-        use_real = False
-        print("[Arduino] Hardware jo i gjetur — simulim aktiv")
-
-    t = 0.0
     while True:
-        t += 0.5
+        sim_t += 0.3
 
-        if use_real and arduino:
+        if arduino and arduino.connected:
             data = arduino.read_data()
             if data is None:
-                time.sleep(0.5)
+                time.sleep(0.1)
                 continue
         else:
-            raw = int(450 + math.sin(t * 0.28) * 220)
-            raw = max(0, min(1023, raw))
-            pct = round((1 - raw / 1023) * 100, 1)
-
-            if   raw < 300: status = 'WET'
-            elif raw < 500: status = 'OPTIMAL'
-            elif raw < 700: status = 'DRY'
-            else:           status = 'CRITICAL'
-
+            # Simulim — lëvizje normale me pengesa rastësore
+            dirs = ['FORWARD', 'FORWARD', 'FORWARD', 'LEFT', 'RIGHT', 'STOP']
+            dist = round(abs(60 + math.sin(sim_t * 0.4) * 50), 1)
             data = {
-                'moisture_raw':    raw,
-                'moisture_pct':    pct,
-                'moisture_status': status,
-                'soil_temp':       round(21 + math.sin(t * 0.18) * 5, 1),
-                'air_temp':        round(24 + math.sin(t * 0.13) * 3, 1),
-                'humidity':        round(60 + math.sin(t * 0.22) * 14, 0),
-                'distance':        round(80 + random.uniform(-10, 10), 1),
-                'can_plant':       status == 'OPTIMAL',
-                'crop':            'tomatoes',
+                'distance':        dist,
+                'ir_left':         0,
+                'ir_right':        0,
+                'direction':       random.choice(dirs),
+                'servo_angle':     90,
+                'mode':            'AUTO',
+                'obstacle':        'NEAR' if dist < 15 else ('CLOSE' if dist < 30 else 'CLEAR'),
+                'moisture_pct':    round(55 + math.sin(sim_t * 0.2) * 20, 1),
+                'moisture_status': 'OPTIMAL',
+                'moisture_raw':    512,
+                'soil_temp':       round(21 + math.sin(sim_t * 0.1) * 4, 1),
+                'air_temp':        round(24 + math.sin(sim_t * 0.15) * 3, 1),
+                'humidity':        round(62 + math.sin(sim_t * 0.12) * 12, 0),
+                'can_plant':       True,
+                'crop':            'domate',
             }
+            time.sleep(0.3)
 
         sensor_data.update(data)
+
         if _DASH_OK:
-            try: _dash._live_sensors.update(data)
-            except Exception: pass
-        time.sleep(0.5)
+            try:
+                _dash._live_sensors.update(data)
+            except Exception:
+                pass
 
 
-# ── Chatbot thread ────────────────────────────────────────────────────────
-def chatbot_thread(farming_ops=None):
-    time.sleep(2.5)
-    try:
-        from chatbot import ChatBot
-        bot = ChatBot(face_queue=cmd_queue, sensor_data=sensor_data, farming_ops=farming_ops)
-        bot.run_voice_loop()
-    except ImportError as e:
-        print(f"[Chatbot] Import error: {e}")
-    except Exception as e:
-        print(f"[Chatbot] Error: {e}")
+# ═════════════════════════════════════════════════════════════════════════
+# THREAD 2 — Emocione: reagon ndaj lëvizjes dhe pengesave
+# ═════════════════════════════════════════════════════════════════════════
+def emotion_thread():
+    """
+    Shikon direction + obstacle + moisture nga sensor_data
+    dhe dërgon emocionin e duhur tek fytyra.
+    """
+    _last_state = [None]
 
-
-# ── Auto emotion thread ───────────────────────────────────────────────────
-def auto_emotion_thread():
-    """Monitoron sensoret dhe ndryshon fytyren automatikisht."""
-    _last = {'status': None}
-
-    def _emit(state, text):
-        if state != _last['status']:
-            _last['status'] = state
+    def emit(state, text):
+        if state != _last_state[0]:
+            _last_state[0] = state
             cmd_queue.put({'state': state, 'text': text, 'mic': False})
 
+    time.sleep(3)   # prit të niset Arduino
+
     while True:
-        time.sleep(2)
+        time.sleep(0.5)
         if not sensor_data:
             continue
-        status = sensor_data.get('moisture_status', 'OPTIMAL')
-        pct    = float(sensor_data.get('moisture_pct', 50))
 
-        if   status == 'OPTIMAL':  _emit('happy',    f'Lagështia optimale {pct:.0f}%')
-        elif status == 'DRY':      _emit('sad',       f'Toka e thatë {pct:.0f}%')
-        elif status == 'WET':      _emit('confused',  f'Toka shumë e lagët {pct:.0f}%')
-        elif status == 'CRITICAL': _emit('angry',     f'Gjendje kritike {pct:.0f}%')
+        direction = sensor_data.get('direction', 'STOP')
+        obstacle  = sensor_data.get('obstacle',  'CLEAR')
+        moisture  = sensor_data.get('moisture_status', 'OPTIMAL')
+        dist      = sensor_data.get('distance', 999)
+        pct       = sensor_data.get('moisture_pct', 50)
+
+        # Pengesë afër — prioritet i lartë
+        if obstacle == 'NEAR' or dist < 15:
+            emit('angry', f'Pengesë! {dist:.0f}cm')
+        elif obstacle == 'CLOSE' or dist < 30:
+            emit('confused', f'Objekt afër {dist:.0f}cm')
+
+        # Lëvizja normale
+        elif direction == 'FORWARD':
+            emit('happy', 'Duke ndjekur vijën...')
+        elif direction in ('LEFT', 'RIGHT'):
+            emit('thinking', f'Kthim {direction.lower()}')
+        elif direction == 'STOP':
+            emit('idle', 'Ndaluar')
+
+        # Gjendja e tokës (prioritet i ulët)
+        elif moisture == 'DRY':
+            emit('sad', f'Toka e thatë {pct:.0f}%')
+        elif moisture == 'WET':
+            emit('confused', f'Toka shumë e lagët {pct:.0f}%')
+        elif moisture == 'CRITICAL':
+            emit('angry', f'Krizë lagështie {pct:.0f}%')
+        else:
+            emit('happy', f'Gjithçka OK — lagështia {pct:.0f}%')
 
 
-# ── Entry point ───────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════
+# THREAD 3 — Farming / Servo Pi GPIO
+# ═════════════════════════════════════════════════════════════════════════
+def farming_thread(farming_ops):
+    if farming_ops is None:
+        return
+    time.sleep(4)
+    try:
+        farming_ops.start_soil_monitoring(interval=30.0)
+        print("[Farm] Monitorimi i tokës aktiv")
+    except Exception as e:
+        print(f"[Farm] {e}")
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
-    print("=" * 55)
-    print("  Terra Guide — Raspberry Pi  🌱")
-    print("=" * 55)
+    print("=" * 60)
+    print("  ARES-X  |  Terra Guide — Raspberry Pi")
+    print("=" * 60)
 
-    # ── Arduino ──────────────────────────────────────────────
+    # ── 1. Arduino ────────────────────────────────────────────
     arduino = None
     try:
         from arduino_comm import ArduinoComm
         arduino = ArduinoComm()
-        print("[Main] Arduino: U LIDH")
+        if arduino.connected:
+            print("[Main] Arduino: U LIDH")
+            time.sleep(0.5)
+            # Nis ndjekjen automatike të vijës menjëherë
+            arduino.send("CMD:AUTO")
+            print("[Main] Arduino: CMD:AUTO dërguar — robot nis vijën")
+        else:
+            print("[Main] Arduino: jo i lidhur — simulim aktiv")
     except Exception as e:
-        print(f"[Main] Arduino: simulim aktiv ({e})")
+        print(f"[Main] Arduino gabim: {e}")
 
-    # ── Servo Pi (GPIO) — krijohet nga FarmingOperations automatikisht ──
-    pi_servos = None
-
-    # ── Farming Operations ────────────────────────────────────────
+    # ── 2. Farming Operations + Servo Pi GPIO ─────────────────
+    pi_servos   = None
     farming_ops = None
     try:
         from farming_operations import FarmingOperations
         farming_ops = FarmingOperations(arduino=arduino, sensor_data=sensor_data)
-        pi_servos = farming_ops.servos._pi  # referenca tek PiServoController
-        print("[Main] Farming Operations + Servo Pi GPIO: AKTIV")
+        pi_servos   = getattr(getattr(farming_ops, 'servos', None), '_pi', None)
+        print("[Main] Farming Ops + Servo GPIO: AKTIV")
     except Exception as e:
         print(f"[Main] Farming ops: {e}")
 
-    # ── Threads ───────────────────────────────────────────────
-    t1 = threading.Thread(target=arduino_thread,      daemon=True, name='Arduino')
-    t2 = threading.Thread(target=chatbot_thread,      args=(farming_ops,), daemon=True, name='ChatBot')
-    t3 = threading.Thread(target=auto_emotion_thread, daemon=True, name='AutoEmotion')
-    t1.start()
-    t2.start()
-    t3.start()
+    # ── 3. Nis threads ────────────────────────────────────────
+    threads = [
+        threading.Thread(target=arduino_thread,  args=(arduino,),       daemon=True, name='Arduino'),
+        threading.Thread(target=emotion_thread,                          daemon=True, name='Emotion'),
+        threading.Thread(target=farming_thread,  args=(farming_ops,),   daemon=True, name='Farming'),
+    ]
+    for t in threads:
+        t.start()
 
     if _DASH_OK:
-        t4 = threading.Thread(target=_dash.run_dashboard, daemon=True, name='Dashboard')
-        t4.start()
-        print('[Main] Dashboard: port 5000')
+        td = threading.Thread(target=_dash.run_dashboard, daemon=True, name='Dashboard')
+        td.start()
+        print('[Main] Dashboard: http://localhost:5000')
 
-    print("[Main] Të gjitha threaded-et aktive — Duke nisur fytyra...\n")
+    print("[Main] Të gjitha threads aktive\n")
 
-    # ── Fytyra Fullscreen — import lazy këtu (pas DISPLAY setup) ─
+    # ── 4. Fytyra Fullscreen në Pi ────────────────────────────
+    # import lazy këtu — pas DISPLAY=:0 setup
     try:
         from face_engine import run_face
-        cmd_queue.put({'state': 'happy', 'text': 'Terra Guide është gati!', 'mic': False})
-        run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)
+        cmd_queue.put({'state': 'happy', 'text': 'ARES-X Duke ndjekur vijën!', 'mic': False})
+        run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)   # bllokues — loop kryesor
+
     except Exception as e:
         print(f"[Face] GABIM: {e}")
-        print("[Face] Vetëm backend aktiv — kontrollo DISPLAY")
+        print("[Face] Backend aktiv pa fytyra — Ctrl+C për të ndalur")
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("\n[Pi] Ndërprerë.")
+            pass
 
-    # ── Pastrim Servo ─────────────────────────────────────────
+    # ── 5. Pastrim pas mbylljes ───────────────────────────────
+    print("\n[Main] Duke ndalur robotin...")
+    if arduino and arduino.connected:
+        arduino.send("CMD:STOP")
+        print("[Main] CMD:STOP dërguar tek Arduino")
     if pi_servos:
-        pi_servos.cleanup()
+        try:
+            pi_servos.cleanup()
+        except Exception:
+            pass
+    print("[Main] Ndalur.")
