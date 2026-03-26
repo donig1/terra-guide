@@ -1,43 +1,31 @@
-"""
-test_servo.py — Testo servo motoret
-Ekzekuto: python3 test_servo.py
-"""
 from pi_servo_controller import PiServoController
 import time
 
-print("=" * 40)
-print("  TESTI I SERVO MOTOREVE")
-print("=" * 40)
-
-s = PiServoController()
+servo = PiServoController()
 time.sleep(1)
 
-print("\n[1/3] Servo 1 — PLUGU")
-print("  Duke shkuar ne 0 grade...")
-s.plow(0)
-time.sleep(1)
-print("  Duke shkuar ne 180 grade...")
-s.plow(180)
-time.sleep(1)
+print("\n=== TEST 1: PLUGUN (GPIO 17) ===")
+print("Duke lëvizur 180° → 90° → 0° → 180°")
+servo.plow(180);  time.sleep(1)
+servo.plow(90);   time.sleep(1)
+servo.plow(0);    time.sleep(1)
+servo.plow(180);  time.sleep(1)
+print("✓ PLUGUN OK")
 
-print("\n[2/3] Servo 2 — SENSORI")
-print("  Duke shkuar ne 0 grade...")
-s.scan(0)
-time.sleep(1)
-print("  Duke shkuar ne 90 grade...")
-s.scan(90)
-time.sleep(1)
+print("\n=== TEST 2: SENSOR (GPIO 27) ===")
+print("Duke lëvizur 90° → 40° → 90°")
+servo.scan(90);   time.sleep(1)
+servo.scan(40);   time.sleep(1)
+servo.scan(90);   time.sleep(1)
+print("✓ SENSOR OK")
 
-print("\n[3/3] Servo 3 — KAZANI")
-print("  Duke hapur kazanin...")
-s.dispense(True)
-time.sleep(2)
-print("  Duke mbyllur kazanin...")
-s.dispense(False)
-time.sleep(1)
+print("\n=== TEST 3: KAZAN (GPIO 22) ===")
+print("Duke rrotulluar 2 sekonda...")
+servo.dispense(True);  time.sleep(2)
+servo.dispense(False); time.sleep(1)
+print("✓ KAZAN OK")
 
-print("\n" + "=" * 40)
-print("  GJITHE SERVOT U TESTUAN!")
-print("=" * 40)
-
-s.cleanup()
+print("\n=== RESET ===")
+servo.reset_all()
+servo.cleanup()
+print("✓ Test i përfunduar!")
