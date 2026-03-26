@@ -20,14 +20,21 @@ Instalim: pip install RPi.GPIO
 import threading
 import time
 
-# ── Provo të importosh RPi.GPIO, fallback në simulim ──────────────
+# ── Provo të importosh RPi.GPIO / rpi-lgpio, fallback në simulim ──
 try:
     import RPi.GPIO as GPIO
     _GPIO_OK = True
     print("[PiServo] RPi.GPIO ngarkuar — modalitet REAL")
 except ImportError:
-    _GPIO_OK = False
-    print("[PiServo] RPi.GPIO nuk u gjet — modalitet SIMULIM aktiv")
+    try:
+        # rpi-lgpio = drop-in replacement për Raspberry Pi 5
+        import lgpio as GPIO
+        _GPIO_OK = True
+        print("[PiServo] lgpio ngarkuar — modalitet REAL (Pi 5)")
+    except ImportError:
+        _GPIO_OK = False
+        print("[PiServo] GPIO nuk u gjet — modalitet SIMULIM aktiv")
+        print("[PiServo] Instalo: sudo apt install python3-lgpio && sudo pip3 install rpi-lgpio")
 
 
 # ── Pin të Raspberry Pi (BCM numbering) ──────────────────────────
