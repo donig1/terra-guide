@@ -44,15 +44,36 @@ PIN_HOPPER = 22    # GPIO 22 — Servo 3: Kazan Fare (continuous)
 
 PWM_FREQ   = 50    # Hz — standard servo frequency
 
-# ── Konvertimet e këndit → duty cycle ────────────────────────────
-def _angle_to_duty(angle: float) -> float:
-    """Konverto kënd 0-180° në duty cycle % (5.0–10.0)."""
-    return 5.0 + (angle / 180.0) * 5.0
+# ══════════════════════════════════════════════════════════════════
+# KALIBRIMI — ndrysho këto vlera sipas rezultateve të calibrate_servo.py
+# Gjen vlerat duke ekzekutuar:  python3 calibrate_servo.py
+# ══════════════════════════════════════════════════════════════════
 
-# Continuous rotation (kazan) duty cycles
-HOPPER_STOP    = 7.5   # ndal
-HOPPER_FORWARD = 10.0  # rrotacion para (hapje fare)
+# Servo 1 — PLUGUN (GPIO 17)
+PLOW_DUTY_MIN = 5.0    # duty cycle për 0°
+PLOW_DUTY_MAX = 10.0   # duty cycle për 180°
+
+# Servo 2 — SENSOR LAGËSHTIE (GPIO 27)
+SENS_DUTY_MIN = 5.0    # duty cycle për 0°
+SENS_DUTY_MAX = 10.0   # duty cycle për 180°
+
+# Servo 3 — KAZAN FARE continuous rotation (GPIO 22)
+HOPPER_STOP    = 7.5   # ndal (servo i drejtë)
+HOPPER_FORWARD = 10.0  # rrotacion para
 HOPPER_BACK    = 5.0   # rrotacion prapa
+
+# ── Konvertimet e këndit → duty cycle (per servo) ────────────────
+def _angle_to_duty_plow(angle: float) -> float:
+    """Konverto kënd 0-180° në duty cycle për servo PLUGUN."""
+    return PLOW_DUTY_MIN + (max(0, min(180, angle)) / 180.0) * (PLOW_DUTY_MAX - PLOW_DUTY_MIN)
+
+def _angle_to_duty_sensor(angle: float) -> float:
+    """Konverto kënd 0-180° në duty cycle për servo SENSOR."""
+    return SENS_DUTY_MIN + (max(0, min(180, angle)) / 180.0) * (SENS_DUTY_MAX - SENS_DUTY_MIN)
+
+# Compat — servo generik
+def _angle_to_duty(angle: float) -> float:
+    return _angle_to_duty_plow(angle)
 
 
 class PiServoController:
@@ -99,8 +120,13 @@ class PiServoController:
         print("[PiServo] GPIO inicializuar — të gjitha servot në pozicionet fillestare")
 
     def _move(self, pin: int, angle: float):
-        """Lëviz servo standard në kënd (0–180°)."""
-        duty = _angle_to_duty(max(0, min(180, angle)))
+        """Lëviz servo në kënd (0–180°) — përdor kalibrimin e saktë per pin."""
+        if pin == PIN_PLOW:
+            duty = _angle_to_duty_plow(angle)
+        elif pin == PIN_SENSOR:
+            duty = _angle_to_duty_sensor(angle)
+        else:
+            duty = _angle_to_duty_plow(angle)   # fallback
         self._duty(pin, duty)
         self._angles[pin] = angle
 
