@@ -27,11 +27,7 @@ try:
 except Exception:
     _DASH_OK = False
 
-try:
-    from face_engine import run_face
-    _FACE_OK = True
-except Exception:
-    _FACE_OK = False
+# face_engine importohet lazy (brenda main) — jo këtu, sepse pygame.init() dështon pa DISPLAY
 
 
 # ── Arduino thread ────────────────────────────────────────────────────────
@@ -163,13 +159,14 @@ if __name__ == '__main__':
 
     print("[Main] Të gjitha threaded-et aktive — Duke nisur fytyra...\n")
 
-    # ── Fytyra Fullscreen ─────────────────────────────────────
-    if _FACE_OK:
-        # Mesazh mirëseardhjeje
+    # ── Fytyra Fullscreen — import lazy këtu (pas DISPLAY setup) ─
+    try:
+        from face_engine import run_face
         cmd_queue.put({'state': 'happy', 'text': 'Terra Guide është gati!', 'mic': False})
         run_face(cmd_queue=cmd_queue, sensor_data=sensor_data)
-    else:
-        print("[Face] pygame nuk u ngarkua — vetëm backend aktiv")
+    except Exception as e:
+        print(f"[Face] GABIM: {e}")
+        print("[Face] Vetëm backend aktiv — kontrollo DISPLAY")
         try:
             while True:
                 time.sleep(1)

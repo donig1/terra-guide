@@ -28,10 +28,11 @@ export XAUTHORITY="$REAL_HOME/.Xauthority"
 echo "[DISPLAY] DISPLAY=$DISPLAY  USER=$REAL_USER"
 
 # ── Shto user në grupin gpio nëse mungon (njëherë) ────────────
-if ! groups "$REAL_USER" | grep -q gpio; then
-    echo "[GPIO] Duke shtuar $REAL_USER në grupin gpio..."
-    sudo usermod -a -G gpio,dialout,spi,i2c "$REAL_USER"
-    echo "[GPIO] KUJDES: Riniso Pi pastaj ekzekuto ./start_pi.sh përsëri"
+if ! groups "$USER" | grep -q gpio; then
+    echo "[GPIO] Duke shtuar $USER në grupin gpio..."
+    sudo usermod -a -G gpio,dialout,spi,i2c "$USER"
+    echo "[GPIO] KUJDES: Riniso Pi me:  sudo reboot"
+    echo "       Pastaj ekzekuto:        ./start_pi.sh"
     exit 0
 fi
 
@@ -49,14 +50,12 @@ echo ""
 echo "[START] Duke nisur Terra Guide..."
 echo ""
 
-# ── Nis si user real me DISPLAY të saktë ─────────────────────
-# Nëse jemi root (sudo), kalo tek user real; ndryshe nis direkt
+# ── Nis si user normal (jo sudo) ─────────────────────────────
+# GPIO punon pa sudo nëse user është në grupin 'gpio'
 if [ "$EUID" -eq 0 ]; then
-    exec sudo -u "$REAL_USER" \
-        DISPLAY="$DISPLAY" \
-        XAUTHORITY="$XAUTHORITY" \
-        PYTHONPATH="$(pwd)" \
-        python3 pi_main.py
-else
-    exec python3 pi_main.py
+    echo "[KUJDES] Mos ekzekuto me sudo! Rinis si user normal:"
+    echo "         ./start_pi.sh"
+    exit 1
 fi
+
+exec python3 pi_main.py
